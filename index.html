@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vane 签字</title>
+<!-- vane 的签名：签字人的 passkey（WebAuthn，memo D-187 / D-188）。这一页由签字人电脑上的本机小服务（setup.bat / setup.sh 装一次，开机自己起）在
+     http://localhost:8765/ 发，只做三件事：登记这台电脑的 passkey（带设备的硬件证明）、把会话链接里带来的东西原样摆出来让人读了再签（一次签完一批）、
+     验过根签字人签的发布单后把自己换成新版。没有任何秘密：私钥在设备里，这一页拿不到。算法与 software/src/vane/passkey.py 逐字相同：
+       一件 challenge = sha256("vane-passkey-v1\n" + 命名空间 + "\n" + 文件的 sha256 十六进制)
+       一批 challenge = sha256("vane-passkey-v1\nbatch\n" + 每件一行「命名空间 sha256」)
+       登记 challenge = sha256("vane-passkey-v1\nvane-signer-self\n" + 名字 + "\n" + nonce) -->
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#666;--card:#fff;--line:#ddd;--ok:#1f6f43;--bad:#9b2c2c;--warn:#8a5a00}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#eceae4;--muted:#a3a19a;--card:#21211f;--line:#3a3a36;--ok:#4cae7a;--bad:#e07070;--warn:#d9a441}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 -apple-system,system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:22px;margin:8px 0 4px}p{margin:8px 0}.muted{color:var(--muted);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:14px 0}
+code,.mono{font:13px/1.45 ui-monospace,Menlo,monospace;word-break:break-all}
+pre.doc{white-space:pre-wrap;max-height:45vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0 0}
+button{font:inherit;font-size:17px;padding:12px 18px;border-radius:10px;border:0;background:var(--ok);color:#fff;width:100%;margin-top:8px;cursor:pointer}
+button.secondary{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+input{width:100%;box-sizing:border-box;font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+textarea{width:100%;box-sizing:border-box;min-height:140px;font:12px/1.4 ui-monospace,Menlo,monospace;border-radius:8px;border:1px solid var(--line);
+  background:var(--bg);color:var(--fg);padding:8px}
+.err{color:var(--bad)}.okc{color:var(--ok)}.warn{color:var(--warn)}
+.tag{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:0 6px;margin-right:6px;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>vane 签字</h1>
+<p class="muted">用这台电脑自己的验证：Windows Hello（PIN / 指纹 / 人脸）、Touch ID 或 USB 安全钥。私钥在设备里，这一页拿不到。签什么，都原样摆在下面。</p>
+<div id="app"></div>
+<p class="muted mono" id="foot"></p>
+</main>
+<script>
+"use strict";
+const PAGE_VERSION = "2.9.0";                            // 2.9.0（用户 2026-11-03「uva簽字默認在最後不是中間」「unfortunate no copy button」，memo D-252）：
+                                                          // 单选组里会话标了 def 的那一项预先选好（UVA 的「最后一次」）；签名经小服务送回 VM 却一件都没落（VM 那边没有这份文件，
+                                                          // 例如云会话发起的请求），就照样给出那段 JSON 与「复制，贴回会话」—— 签名不丢。
+                                                          // 同一版起这一页也是云端签字页（用户 2026-11-03「請你講雲端簽字改到github signPage repo上」）：
+                                                          // https://mxx-yyl.github.io/signPage/ 放的就是这一页的同一份字节；那里没有本机小服务，签完给 JSON 贴回云会话。
+// 2.8.0                            // 2.8.0（用户 2026-10-28「go next」，memo D-232，S11 v2）：认得命名空间 vane-release（一次发布的批准）。
+// 2.7.0                            // 2.7.0（用户 2026-10-26「go ahead with phase 2」，memo D-204）：认得命名空间 vane-fbi-seal（FBI 箱）。
+// 2.6.0                            // 2.6.0（用户 2026-10-23「signpage那個registration每次要的sign也改成類似密碼和passkey的機制」，选「密码只能人来输」）：
+                                                          // 可以再设一个密码，「输密码签」与「用 passkey 签」等价；密码只在这一页里用（scrypt -> Ed25519），不发给任何地方
+// 2.5.0                            // 2.5.0（用户 2026-10-22「vane可能終端有好幾個用戶，每換一個用戶不是說項目不能跑，是繼續跑，passkey只是防止ai 不穩定行為不是人，只要有passkey就可以通過」）：
+                                                          // 同一台电脑上登记过的谁都能签（签的时候不再只认最先登记的那一把）、可以再登记另一个人；认人归会话那边按钥认
+const CLOUD_HOSTS = ["mxx-yyl.github.io"];               // 2.9.0：云端签字页（GitHub Pages 的 signPage 仓）—— passkey 认的是这个域名（susuqni）
+let STATE = null;                                         // 本机小服务的 /vane/state（2.2.0：带 relay = 它能把签名经 ssh 送回 VM）
+const PREFIX = "vane-passkey-v1";
+const PAGE_NS = "vane-signpage";
+const NS_LABEL = {
+  "vane-gates-permit": "登记许可（改了 vane 的门 / 工具 / 签字的规矩）",
+  "vane-carry-contract": "承接契约",
+  "vane-line-allow": "线的许可（mother-takeover / source）",
+  "vane-signer-enroll": "确认一位新的签字人是人（签了 = 你为这个人负责）",
+  "vane-signpage": "签字页的新版本（签了，签字人电脑上的签字页会换成这一版；只有根签字人签的才算）",
+  "vane-fbi-seal": "FBI 的一个版本（签了，fbi/ 这一版的代码与规矩封成只读的 FBI 箱）",
+  "vane-release": "批准一次发布（签了，这一份交付卷宗 RELEASE.toml 就是批准过的那一份，S11 才推给客户）"};
+const ALL_NS = Object.keys(NS_LABEL);
+const HINTS = ["client-device", "security-key"];        // 先用这台电脑自己的验证，不弹「用手机扫码」（用户 2026-10-21「password Touch ID but no face」）
+const app = document.getElementById("app");
+const enc = new TextEncoder();
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
+const b64 = buf => { let s = ""; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const hex = buf => [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2, "0")).join("");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const sha256 = data => crypto.subtle.digest("SHA-256", data);
+const concat = (a, b) => { const o = new Uint8Array(a.byteLength + b.byteLength); o.set(new Uint8Array(a), 0); o.set(new Uint8Array(b), a.byteLength); return o; };
+const tick = () => new Promise(r => setTimeout(r, 30));     // 让「正在算」先画出来
+
+// ---------------------------------------------------------------- 密码钥（2.6.0）：scrypt(密码) -> Ed25519；与 software/src/vane/passkey.py 逐字同一个算法
+const PW_PREFIX = "vane-password-v1";
+const PW_KDF = {name: "scrypt", N: 131072, r: 8, p: 1};     // 2^17：每猜一次要 128 MiB、一两秒
+const unhex = h => Uint8Array.from(h.match(/../g), x => parseInt(x, 16));
+const ED_PKCS8 = unhex("302e020100300506032b657004220420"), ED_SPKI = unhex("302a300506032b6570032100");
+async function pbkdf2(pw, salt, len) {
+  const k = await crypto.subtle.importKey("raw", pw, "PBKDF2", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({name: "PBKDF2", hash: "SHA-256", salt, iterations: 1}, k, len * 8));
+}
+function salsa8(B, x) {                                     // Salsa20/8：B（16 个字）就地更新，x 是 16 个字的草稿
+  x.set(B);
+  const R = (a, b) => (a << b) | (a >>> (32 - b));
+  for (let i = 0; i < 8; i += 2) {
+    x[4] ^= R(x[0] + x[12], 7); x[8] ^= R(x[4] + x[0], 9); x[12] ^= R(x[8] + x[4], 13); x[0] ^= R(x[12] + x[8], 18);
+    x[9] ^= R(x[5] + x[1], 7); x[13] ^= R(x[9] + x[5], 9); x[1] ^= R(x[13] + x[9], 13); x[5] ^= R(x[1] + x[13], 18);
+    x[14] ^= R(x[10] + x[6], 7); x[2] ^= R(x[14] + x[10], 9); x[6] ^= R(x[2] + x[14], 13); x[10] ^= R(x[6] + x[2], 18);
+    x[3] ^= R(x[15] + x[11], 7); x[7] ^= R(x[3] + x[15], 9); x[11] ^= R(x[7] + x[3], 13); x[15] ^= R(x[11] + x[7], 18);
+    x[1] ^= R(x[0] + x[3], 7); x[2] ^= R(x[1] + x[0], 9); x[3] ^= R(x[2] + x[1], 13); x[0] ^= R(x[3] + x[2], 18);
+    x[6] ^= R(x[5] + x[4], 7); x[7] ^= R(x[6] + x[5], 9); x[4] ^= R(x[7] + x[6], 13); x[5] ^= R(x[4] + x[7], 18);
+    x[11] ^= R(x[10] + x[9], 7); x[8] ^= R(x[11] + x[10], 9); x[9] ^= R(x[8] + x[11], 13); x[10] ^= R(x[9] + x[8], 18);
+    x[12] ^= R(x[15] + x[14], 7); x[13] ^= R(x[12] + x[15], 9); x[14] ^= R(x[13] + x[12], 13); x[15] ^= R(x[14] + x[13], 18);
+  }
+  for (let i = 0; i < 16; i++) B[i] = B[i] + x[i];
+}
+function blockMix(X, Y, r, T, S) {                          // scrypt 的 BlockMix（RFC 7914 §4）
+  T.set(X.subarray((2 * r - 1) * 16, 2 * r * 16));
+  for (let i = 0; i < 2 * r; i++) {
+    for (let j = 0; j < 16; j++) T[j] ^= X[i * 16 + j];
+    salsa8(T, S);
+    Y.set(T, i * 16);
+  }
+  for (let i = 0; i < r; i++) { X.set(Y.subarray(2 * i * 16, (2 * i + 1) * 16), i * 16); X.set(Y.subarray((2 * i + 1) * 16, (2 * i + 2) * 16), (i + r) * 16); }
+}
+async function scrypt(pw, salt, N, r, p, dkLen) {
+  const bytes = await pbkdf2(pw, salt, p * 128 * r), dv = new DataView(bytes.buffer), w = 32 * r;
+  const B = new Uint32Array(p * w);
+  for (let i = 0; i < B.length; i++) B[i] = dv.getUint32(i * 4, true);
+  const V = new Uint32Array(w * N), X = new Uint32Array(w), Y = new Uint32Array(w), T = new Uint32Array(16), S = new Uint32Array(16);
+  for (let q = 0; q < p; q++) {
+    X.set(B.subarray(q * w, (q + 1) * w));
+    for (let i = 0; i < N; i++) { V.set(X, i * w); blockMix(X, Y, r, T, S); }
+    for (let i = 0; i < N; i++) {
+      const j = X[(2 * r - 1) * 16] & (N - 1);
+      for (let k = 0; k < w; k++) X[k] ^= V[j * w + k];
+      blockMix(X, Y, r, T, S);
+    }
+    B.set(X, q * w);
+  }
+  const outb = new Uint8Array(B.length * 4), dv2 = new DataView(outb.buffer);
+  for (let i = 0; i < B.length; i++) dv2.setUint32(i * 4, B[i], true);
+  return pbkdf2(pw, outb, dkLen);
+}
+async function pwKey(password, kdf) {                       // -> {priv（只能签、取不出来）, spki, fp}
+  if (!window.crypto || !crypto.subtle) throw new Error("这个浏览器没有 WebCrypto");
+  const seed = await scrypt(enc.encode(password), unb64u(kdf.salt), kdf.N, kdf.r, kdf.p, 32);
+  let priv;
+  try { priv = await crypto.subtle.importKey("pkcs8", concat(ED_PKCS8, seed), {name: "Ed25519"}, true, ["sign"]); }
+  catch (e) { throw new Error("这个浏览器不支持 Ed25519（要 Chrome / Edge 137、Safari 17、Firefox 129 以上）"); }
+  const spki = concat(ED_SPKI, unb64u((await crypto.subtle.exportKey("jwk", priv)).x));
+  return {priv, spki, fp: hex(await sha256(spki))};
+}
+function rememberedPw() { try { return JSON.parse(localStorage.getItem("vane.pwsigners") || "[]").filter(x => x && x.credId && x.kdf); } catch (e) { return []; } }
+function rememberPw(reg) {
+  const keep = {principal: reg.principal, credId: reg.credId, fingerprint: reg.fingerprint, spki: reg.spki, kdf: reg.kdf};
+  try { localStorage.setItem("vane.pwsigners", JSON.stringify(rememberedPw().filter(x => x.credId !== keep.credId).concat([keep]))); } catch (e) {}
+}
+
+function card(html) { app.insertAdjacentHTML("beforeend", `<div class="card">${html}</div>`); return app.lastElementChild; }
+function fail(e) { card(`<p class="err">没成：${esc(e && e.message || e)}</p>`); }
+function out(title, obj, note) {
+  const text = JSON.stringify(obj);
+  const c = card(`<p class="okc"><b>${esc(title)}</b></p><p class="muted">${esc(note)}</p>
+     <textarea readonly>${esc(text)}</textarea><button>复制，贴回会话</button>`);
+  const btn = c.querySelector("button"), ta = c.querySelector("textarea");
+  btn.onclick = async () => { try { await navigator.clipboard.writeText(text); btn.textContent = "已复制"; } catch (e) { ta.focus(); ta.select(); } };
+  c.scrollIntoView({behavior: "smooth", block: "start"});
+}
+
+// ---------------------------------------------------------------- 本机小服务（装一次的那一个）：它记着这台电脑登记的钥、认的根签字人、此刻的页面
+async function loadState() {
+  try { const r = await fetch("/vane/state", {cache: "no-store"}); return r.ok ? await r.json() : null; } catch (e) { return null; }
+}
+async function post(state, path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(Object.assign({token: state.token}, body))});
+  if (!r.ok) throw new Error(path + "：" + r.status + " " + await r.text());
+  return r.json();
+}
+function rememberedMe(state) {
+  if (state && state.me && state.me.fingerprint) return state.me;
+  try { const m = JSON.parse(localStorage.getItem("vane.enrolled") || "null"); if (m && m.fingerprint) return m; } catch (e) {}
+  return null;
+}
+async function rememberMe(state, reg) {
+  try { localStorage.setItem("vane.enrolled", JSON.stringify(reg)); } catch (e) {}
+  if (state && state.token) { try { await post(state, "/vane/me", {me: JSON.stringify(reg)}); } catch (e) {} }   // 记在本机小服务的目录里：清了浏览器也还在
+}
+
+// ---------------------------------------------------------------- 链接带来的东西：#v1.<gzip(JSON) 的 base64url>（全在 # 后面，不发给任何服务器）
+async function readPayload() {
+  if (!location.hash.startsWith("#v1.")) return null;
+  const stream = new Blob([unb64u(location.hash.slice(4))]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(stream).text());
+}
+
+// ---------------------------------------------------------------- 验一份 passkey 断言（签字页发布单用；与 passkey.py 的 verify 同一套检查）
+function originOk(origin, s) { return origin === s.origin || (s.rpId === "localhost" && /^http:\/\/localhost(:\d{1,5})?$/.test(origin)); }
+function derToRaw(der) {                                   // ECDSA 的 DER 签名 -> r‖s（各 32 字节）
+  const d = new Uint8Array(der); let p = 2; const out = new Uint8Array(64);
+  for (let k = 0; k < 2; k++) {
+    if (d[p] !== 0x02) throw new Error("签名不是 DER");
+    let n = d[p + 1], v = d.slice(p + 2, p + 2 + n); p += 2 + n;
+    while (v.length > 32 && v[0] === 0) v = v.slice(1);
+    if (v.length > 32) throw new Error("签名太长");
+    out.set(v, 32 * k + 32 - v.length);
+  }
+  return out;
+}
+async function verifyAssertion(a, ns, data, s) {
+  if (!a || a.schema !== "vane.passkey.assertion.v1") return "不是签字页给的断言";
+  const sha = hex(await sha256(data));
+  let chal;
+  if (Array.isArray(a.items)) {                            // 一批（一次按指纹签了几件）：这一份要在清单里，challenge 按整张清单算
+    if (!a.items.length || a.items.some(i => !(i.ns in NS_LABEL) || !/^[0-9a-f]{64}$/.test(String(i.sha)))) return "一批的清单不对";
+    if (!a.items.some(i => i.ns === ns && i.sha === sha)) return "这一批里没有这一份（命名空间 / sha 对不上）";
+    chal = PREFIX + "\nbatch\n" + a.items.map(i => i.ns + " " + i.sha + "\n").join("");
+  } else {
+    if (a.ns !== ns || a.sha !== sha) return "签的不是这一份（命名空间 / sha 对不上）";
+    chal = PREFIX + "\n" + ns + "\n" + sha;
+  }
+  if (!(s.namespaces || []).includes(ns)) return "这把钥没被允许签 " + ns;
+  const cdj = unb64u(a.clientDataJSON), ad = unb64u(a.authenticatorData), cd = JSON.parse(new TextDecoder().decode(cdj));
+  if (cd.type !== "webauthn.get") return "clientData.type 不对";
+  if (cd.challenge !== b64u(await sha256(enc.encode(chal)))) return "challenge 不对";
+  if (!originOk(cd.origin, s) || cd.crossOrigin) return "origin 不对";
+  if (hex(ad.slice(0, 32)) !== hex(await sha256(enc.encode(s.rpId)))) return "rpIdHash 不对";
+  if ((ad[32] & 0x05) !== 0x05) return "没有用户在场 + 验证";
+  const msg = concat(ad, await sha256(cdj)), sig = unb64u(a.signature), spki = unb64(s.spki);
+  let ok = false;
+  if (s.alg === -7) ok = await crypto.subtle.verify({name: "ECDSA", hash: "SHA-256"}, await crypto.subtle.importKey("spki", spki, {name: "ECDSA", namedCurve: "P-256"}, false, ["verify"]), derToRaw(sig), msg);
+  else if (s.alg === -257) ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", await crypto.subtle.importKey("spki", spki, {name: "RSASSA-PKCS1-v1_5", hash: "SHA-256"}, false, ["verify"]), sig, msg);
+  else if (s.alg === -8) ok = await crypto.subtle.verify("Ed25519", await crypto.subtle.importKey("spki", spki, {name: "Ed25519"}, false, ["verify"]), sig, msg);
+  return ok ? null : "签名不对";
+}
+
+// ---------------------------------------------------------------- 签字页自己更新（setup once + auto update page）
+function fields(text) { const o = {}; for (const ln of text.split("\n")) { const i = ln.indexOf(" = "); if (i > 0 && !ln.startsWith("#")) o[ln.slice(0, i)] = ln.slice(i + 3); } return o; }
+async function considerRelease(state, rel, me) {
+  if (!rel || !state || !state.install) return {status: "none"};
+  const sha = hex(await sha256(enc.encode(rel.page)));
+  if (sha === state.page) return {status: "current"};
+  const m = fields(rel.manifest || "");
+  if (m.page !== sha) return {status: "rejected", note: "发布单写的页面 sha 与链接带来的页面不一样"};
+  if (m.signers !== hex(await sha256(enc.encode(rel.signers || "")))) return {status: "rejected", note: "发布单写的根名单 sha 与带来的不一样"};
+  if (state.built && m.built && m.built < state.built) return {status: "rejected", note: "比这台电脑上的签字页旧（不往回换）"};
+  // 只认这台电脑已经认的根签字人；还一位都不认（第一次装、根名单是空的）时，只认这台电脑上登记的这个人自己
+  let authority = ((state.roots && state.roots.signers) || []).filter(s => (s.namespaces || []).includes(PAGE_NS));
+  const bootstrap = authority.length === 0;
+  if (bootstrap) authority = me ? [Object.assign({}, me, {namespaces: ALL_NS})] : [];
+  const who = rel.assertion && authority.find(s => s.credId === rel.assertion.credId);
+  if (!who) return bootstrap && me ? {status: "needs-local", manifest: m} : {status: "rejected", note: "发布单不是这台电脑认的根签字人签的"};
+  const err = await verifyAssertion(rel.assertion, PAGE_NS, enc.encode(rel.manifest), who);
+  return err ? {status: "rejected", note: "发布单的签名验不过：" + err} : {status: "install", manifest: m, by: who.principal};
+}
+async function install(state, rel, assertion, m) {
+  await post(state, "/vane/install", {page: rel.page, signers: rel.signers, manifest: rel.manifest, assertion: JSON.stringify(assertion), box: m.box || "", built: m.built || ""});
+  location.reload();                                       // 同一个链接（# 后面原样留着）由新页接着处理
+}
+async function approveLocally(state, rel, me, m) {
+  const sha = hex(await sha256(enc.encode(rel.manifest)));
+  const a = await navigator.credentials.get({publicKey: {challenge: await sha256(enc.encode(PREFIX + "\n" + PAGE_NS + "\n" + sha)), rpId: location.hostname,
+    userVerification: "required", timeout: 120000, hints: HINTS, allowCredentials: [{type: "public-key", id: unb64u(me.credId)}]}});
+  const assertion = {schema: "vane.passkey.assertion.v1", ns: PAGE_NS, sha, file: "signpage/" + (m.box || "") + ".txt", credId: b64u(a.rawId),
+    authenticatorData: b64u(a.response.authenticatorData), clientDataJSON: b64u(a.response.clientDataJSON), signature: b64u(a.response.signature)};
+  const err = await verifyAssertion(assertion, PAGE_NS, enc.encode(rel.manifest), Object.assign({}, me, {namespaces: ALL_NS}));
+  if (err) throw new Error("自己签的发布单验不过：" + err);
+  await install(state, rel, assertion, m);
+}
+
+// ---------------------------------------------------------------- 登记（每台电脑一次）
+async function enroll(state, who, me) {
+  if (!who) throw new Error("先写你的名字（GitHub 用户名或你在团队里的名字）");
+  const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
+  const cred = await navigator.credentials.create({publicKey: {
+    rp: {name: "vane", id: location.hostname},
+    user: {id: crypto.getRandomValues(new Uint8Array(16)), name: who, displayName: who + " (vane)"},
+    challenge: await sha256(enc.encode(PREFIX + "\nvane-signer-self\n" + who + "\n" + nonce)),
+    pubKeyCredParams: [{type: "public-key", alg: -7}, {type: "public-key", alg: -8}, {type: "public-key", alg: -257}],
+    authenticatorSelection: {residentKey: "preferred", userVerification: "required"},
+    attestation: "direct",                                 // 设备的硬件证明（Windows Hello 的 TPM、YubiKey、Apple）：接到厂商根就当场是签字人，不用谁批准
+    excludeCredentials: [],                                // 2.5.0：同一台电脑可以登记好几个人 —— 不再排除最先登记的那一把
+    hints: HINTS, timeout: 120000}});
+  const spki = cred.response.getPublicKey();
+  if (!spki) throw new Error("这个浏览器给不出公钥（要 Chrome / Edge 85、Safari 16 以上）");
+  const reg = {schema: "vane.passkey.signer.v1", principal: who, rpId: location.hostname, origin: location.origin, page: location.origin + "/",
+    credId: b64u(cred.rawId), alg: cred.response.getPublicKeyAlgorithm(), spki: b64(spki), fingerprint: hex(await sha256(spki)), nonce,
+    attestationObject: b64u(cred.response.attestationObject), clientDataJSON: b64u(cred.response.clientDataJSON),
+    transports: cred.response.getTransports ? cred.response.getTransports() : []};
+  await rememberMe(state, reg);
+  app.innerHTML = "";
+  showEnrolled(reg, true);
+}
+async function enrollPassword(who, pw, again) {
+  if (!who) throw new Error("先写你的名字（GitHub 用户名或你在团队里的名字）");
+  if (pw.length < 12) throw new Error("密码至少 12 个字符（几个不相干的词最好）：登记记录里有公钥与盐，拿得到仓库的人可以离线猜");
+  if (pw !== again) throw new Error("两次输入的密码不一样");
+  const note = card(`<p class="muted">正在用密码算钥（scrypt，几秒钟）……</p>`);
+  await tick();
+  const kdf = Object.assign({}, PW_KDF, {salt: b64u(crypto.getRandomValues(new Uint8Array(16)))});
+  const k = await pwKey(pw, kdf);
+  const reg = {schema: "vane.passkey.signer.v1", kind: "password", principal: who, rpId: "password", origin: location.origin, page: location.origin + "/",
+    credId: "pw-" + k.fp.slice(0, 32), alg: -8, spki: b64(k.spki), fingerprint: k.fp, kdf};
+  rememberPw(reg);
+  note.remove();
+  app.innerHTML = "";
+  out("密码钥算好了：把下面这段贴回会话（只这一次）", reg, "这里只有公钥和盐，没有密码。会话 `vane sign enroll` 收下以后会给你一个链接：用你自己的 passkey 签一下，确认这把密码钥是你的（D-187：软件钥要一位签字人担保）。" +
+    "之后签字页上「输密码签」就和 passkey 一样算数；密码只在这一页里用，不发给任何地方。钥指纹 " + k.fp.slice(0, 16) + "…");
+}
+function showEnrolled(reg, fresh) {
+  out(fresh ? "登记好了：把下面这段贴回会话（只这一次）" : "这台电脑登记的钥（" + reg.principal + "）",
+    reg, "钥指纹 " + reg.fingerprint.slice(0, 16) + "…（会话里会印同一串，对一下）。会话 `vane sign enroll` 验设备的证明：Windows Hello / YubiKey 这类证明得了是硬件的，当场就是签字人；" +
+    "证明不了的（例如 iCloud 钥匙串），要任一位签字人点一下确认你是人。以后不用再来这一页：会话给的签字链接直接在这里打开。");
+}
+
+// ---------------------------------------------------------------- 签（一件或一批，一次按指纹 / PIN）
+// 回程（2.1.0，docs/design/passkey-return.zh.md）：链接带了 VM 的收件地址，签完就跳过去，签名自己回到 VM（人只签，不复制、不粘贴）。
+// 只认这一种形状：http(s)://<主机>:<端口>/vane/return —— 跳转不受 connect-src 约束，页面的 fetch 照旧只连本机小服务。
+function returnUrl(ret) {
+  try { const u = new URL(String(ret || "")); return /^https?:$/.test(u.protocol) && u.port && u.pathname === "/vane/return" && !u.search && !u.hash && !u.username ? u : null; }
+  catch (e) { return null; }
+}
+const chalTextOf = items => items.length === 1 ? PREFIX + "\n" + items[0].ns + "\n" + items[0].sha
+  : PREFIX + "\nbatch\n" + items.map(i => i.ns + " " + i.sha + "\n").join("");
+function withItems(res, items) {
+  if (items.length === 1) Object.assign(res, {ns: items[0].ns, sha: items[0].sha, file: items[0].file});
+  else res.items = items.map(i => ({ns: i.ns, sha: i.sha, file: i.file}));
+  return res;
+}
+async function sign(items, me, ret) {
+  const a = await navigator.credentials.get({publicKey: {challenge: await sha256(enc.encode(chalTextOf(items))), rpId: location.hostname, userVerification: "required",
+    timeout: 120000, hints: HINTS, allowCredentials: []}});   // 2.5.0：这台电脑上谁的 passkey 都行（会话按钥认是不是签字人）
+  const res = {schema: "vane.passkey.assertion.v1", credId: b64u(a.rawId), authenticatorData: b64u(a.response.authenticatorData),
+    clientDataJSON: b64u(a.response.clientDataJSON), signature: b64u(a.response.signature)};
+  if (me && me.principal && b64u(a.rawId) === me.credId) res.by = me.principal;   // 用的是别人的钥就不写名字（会话按钥认）
+  return deliver(withItems(res, items), items, ret);
+}
+async function signWithPassword(items, pw, cands, ret) {   // 2.6.0：试每一把登记过的密码钥（同一套 kdf 只算一次），对得上指纹的那一把来签
+  const note = card(`<p class="muted">正在用密码算钥（scrypt，几秒钟）……</p>`);
+  await tick();
+  const cache = {};
+  for (const c of cands) {
+    const key = JSON.stringify(c.kdf);
+    const k = cache[key] || (cache[key] = await pwKey(pw, c.kdf));
+    if (k.fp !== c.fingerprint) continue;
+    const msg = concat(enc.encode(PW_PREFIX + "\n"), await sha256(enc.encode(chalTextOf(items))));
+    const sig = await crypto.subtle.sign({name: "Ed25519"}, k.priv, msg);
+    note.remove();
+    return deliver(withItems({schema: "vane.passkey.assertion.v1", kind: "password", credId: c.credId, signature: b64u(sig), by: c.principal}, items), items, ret);
+  }
+  note.remove();
+  throw new Error("密码不对（或这个密码还没登记成签字人）");
+}
+async function deliver(res, items, ret) {
+  const one = items.length === 1;
+  if (STATE && STATE.relay && STATE.token) {
+    // 2.2.0（docs/design/passkey-return.zh.md §七）：交给本机小服务，它经 ssh 送回 VM（VM 上验过才落）—— 页面只连 'self'，什么都不用复制
+    card(`<p class="okc"><b>签好了，正在送回 VM ……</b></p>`);
+    const r = await post(STATE, "/vane/signed", {assertion: res});
+    const rows = (r.results || []).map(x => `<li class="${x.ok ? "okc" : "err"}">${x.ok ? "✓" : "✗"} ${esc(String(x.file || "").split("/").pop())} —— ${esc(x.note || "")}</li>`).join("");
+    const n = (r.results || []).filter(x => x.ok).length;
+    card(`<p class="${n && n === (r.results || []).length ? "okc" : "err"}"><b>${n ? "签名回到 VM 了：落了 " + n + " 件" : "没有落下"}</b></p><ul>${rows}</ul>
+      <p class="muted">${esc(r.note || "")}</p>`).scrollIntoView({behavior: "smooth", block: "start"});
+    // 2.9.0：一件都没落（VM 上没有这份文件 —— 例如云会话发起的请求）：签名照样交给人，贴回发起的那个会话
+    if (!n) out("VM 没落下：把下面这段贴回发起签字的那个会话", res, (one ? "这段只批准上面那一份文件的这几个字节" : "这段批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "；改一个字节就作废");
+    return;
+  }
+  const back = returnUrl(ret);
+  if (back) {
+    card(`<p class="okc"><b>签好了，正在送回 VM：${esc(back.origin)}</b></p><p class="muted">收件页会说落了几件。连不上就点浏览器的「后退」回到这一页再签一次（链接还在）。</p>`);
+    back.search = "?a=" + b64u(enc.encode(JSON.stringify(res)));
+    location.assign(back.href);
+    return;
+  }
+  out("签好了：把下面这段贴回会话", res, (one ? "这段只批准上面那一份文件的这几个字节" : "这段批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "；改一个字节就作废。会话 `vane sign accept` 逐件验过才落。");
+}
+function enrollSummary(text) {
+  try { const d = JSON.parse(text), s = d.signer || {}; return `<p>名字 <b>${esc(s.principal)}</b> · 钥 <span class="mono">${esc(String(s.fingerprint || "").slice(0, 16))}…</span> · 设备证明 <span class="mono">${esc((d.attestation || {}).fmt || "没有")}</span></p>
+    <p class="muted">只在你确认这是一个真的人（你认识、知道他在登记）时才签。签了 = 你为他负责；AI 自己造的钥就是靠这一步挡住的。</p>`; } catch (e) { return ""; }
+}
+async function showItems(items, me, ret, pwSigners) {
+  const ready = [];
+  for (const it of items) {
+    if (!(it.ns in NS_LABEL)) return fail("这一页不认得命名空间 " + it.ns + " —— 不签（签字页要先更新）");
+    const bytes = it.t !== undefined ? enc.encode(it.t) : unb64u(it.c || "");
+    const sha = hex(await sha256(bytes));
+    if (it.sha && it.sha !== sha) return fail("链接里说的 sha 与带来的内容算出来的不一样（" + it.file + "）—— 不签");
+    ready.push({ns: it.ns, sha, file: it.file || "", text: it.t !== undefined ? it.t : null, size: bytes.length,
+                choice: typeof it.choice === "string" ? it.choice : "", label: String(it.label || ""), ask: String(it.ask || ""), def: it.def === true});
+  }
+  // 2.3.0（docs/design/prosecutor-optional.zh.md）：同一组（choice）的几件是二选一 —— 画成单选，签的那一批只含选中的那一件
+  const groups = [...new Set(ready.filter(it => it.choice).map(it => it.choice))];
+  const plain = ready.filter(it => !it.choice);
+  const n = plain.length + groups.length;
+  card(`<p><b>要你签的：${n} 件</b>${groups.length ? `（其中 ${groups.length} 件是单选）` : ""}</p><p class="muted">每一件都是原样（签的就是这些字节）。读完再签；不签就关掉这一页，什么都不会发生。</p>`);
+  let k = 0;
+  // 2.4.0：每一件最上面一句「主诉求」（用户 2026-10-21「下次passkey 要写主诉求  不要一堆没用的文字」）—— 只是标签、不签；签的原文折在下面
+  plain.forEach(it => card(`<p style="font-size:18px"><span class="tag">${++k}</span><b>${esc(it.ask || NS_LABEL[it.ns])}</b></p>
+    ${it.ns === "vane-signer-enroll" && it.text ? enrollSummary(it.text) : ""}
+    <details><summary class="muted">原文（签的就是这些字节）· ${esc(it.file || "（没写名字）")} · sha256 ${esc(it.sha.slice(0, 16))}…</summary>
+    ${it.text !== null ? `<pre class="doc mono">${esc(it.text)}</pre>` : `<p class="muted">（二进制，${it.size} 字节）</p>`}</details>`));
+  const picked = {};
+  groups.forEach((g, gi) => {
+    const opts = ready.filter(it => it.choice === g);
+    const c = card(`<p style="font-size:18px"><span class="tag">${++k}</span><b>${esc(opts[0].ask || ("二选一：" + g))}</b></p>` +
+      opts.map((it, oi) => `<label style="display:block;margin:10px 0"><input type="radio" name="g${gi}" value="${oi}"${it.def ? " checked" : ""} style="width:auto;margin-right:8px">
+        <b>${esc(it.label || it.file)}</b></label><details><summary class="muted">原文（${esc(it.file)} · sha256 ${esc(it.sha.slice(0, 16))}…）</summary>
+        <pre class="doc mono">${esc(it.text || "")}</pre></details>`).join(""));
+    c.querySelectorAll("input[type=radio]").forEach(r => r.onchange = () => { picked[g] = opts[Number(r.value)]; update(); });
+    const d = opts.findIndex(it => it.def);                // 2.9.0：会话标了默认的那一项预先选好（仍可改选）
+    if (d >= 0) picked[g] = opts[d];
+  });
+  const c = card(`<button></button><p class="muted">用你自己的 passkey 签：这台电脑上登记过的谁都可以（${me ? "最近登记的是 " + esc(me.principal) + "；" : ""}会话那边按钥认签字人）</p>`);
+  const btn = c.querySelector("button");
+  // 2.6.0：或者输密码签（链接带来的被信任的密码钥 + 这台电脑上登记过的；只有公钥与盐）
+  const seen = new Set(), cands = (pwSigners || []).concat(rememberedPw()).filter(x => x && x.credId && !seen.has(x.credId) && seen.add(x.credId));
+  const pc = card(`<p><b>或者：输密码签</b></p><p class="muted">${cands.length ? "密码只在这台电脑的浏览器里用来签名，不发给任何地方。" +
+    "（登记过的密码钥：" + cands.map(x => esc(x.principal)).join("、") + "）" : "还没有登记过密码钥：首页「设一个密码」登记一把，用 passkey 担保一次以后就能用密码签。"}</p>
+    <input type="password" autocomplete="current-password" placeholder="你的 vane 签字密码"><button class="secondary"></button>`);
+  const pin = pc.querySelector("input"), pbtn = pc.querySelector("button");
+  if (!cands.length) { pin.disabled = true; }
+  function update() {
+    const left = groups.filter(g => !picked[g]).length;
+    btn.disabled = left > 0;
+    btn.textContent = left ? "先在单选里选一项" : (n === 1 ? "用 passkey 签这一件" : "用 passkey 一次签这 " + n + " 件") + "（Windows Hello / Touch ID / PIN）";
+    pbtn.disabled = left > 0 || !cands.length;
+    pbtn.textContent = left ? "先在单选里选一项" : (n === 1 ? "用密码签这一件" : "用密码一次签这 " + n + " 件");
+  }
+  update();
+  btn.onclick = () => { btn.disabled = true; sign(plain.concat(groups.map(g => picked[g])), me, ret).catch(e => { btn.disabled = false; fail(e); }); };
+  pbtn.onclick = () => { pbtn.disabled = true; signWithPassword(plain.concat(groups.map(g => picked[g])), pin.value, cands, ret)
+    .then(() => { pin.value = ""; }).catch(e => { pbtn.disabled = false; fail(e); }); };
+}
+
+// ---------------------------------------------------------------- 首页（没有链接时）
+function home(state, me) {
+  if (me) {
+    const c = card(`<p class="okc"><b>这台电脑已经登记：${esc(me.principal)}</b>（钥 <span class="mono">${esc(me.fingerprint.slice(0, 16))}…</span>）</p>
+      <p class="muted">不用再做什么：会话给的签字链接直接在这里打开，读了再按一次指纹 / PIN。签字页有新版本时，链接会把它带来，这一页验过根签字人的签名自己换上。</p>
+      <button class="secondary" data-k="show">再看一次登记的那段 JSON</button><button class="secondary" data-k="again">再登记一把（另一个人 / 另一把安全钥）</button>
+      <button class="secondary" data-k="pw">设一个密码（也能签）</button>`);
+    c.querySelector('[data-k="show"]').onclick = () => showEnrolled(me, false);
+    c.querySelector('[data-k="again"]').onclick = () => enrollForm(state, me);
+    c.querySelector('[data-k="pw"]').onclick = () => passwordForm();
+    return;
+  }
+  enrollForm(state, null);
+}
+function passwordForm() {                                   // 2.6.0
+  const c = card(`<p><b>设一个签字密码</b>（和 passkey 一样能签；忘了 passkey 设备也还能签）</p>
+    <p class="muted">密码在这一页里变成一把签名钥（scrypt + Ed25519），只交出公钥。贴回会话之后，用你的 passkey 担保一次，这把密码钥就是签字人。密码只有你自己输：
+    会话（AI）拿不到它，环境变量里的密码也不能签。至少 12 个字符，几个不相干的词最好。</p>
+    <input placeholder="你的名字（GitHub 用户名）" autocomplete="username" data-k="who"><input type="password" placeholder="签字密码" autocomplete="new-password" data-k="pw">
+    <input type="password" placeholder="再输一次" autocomplete="new-password" data-k="again"><button>用这个密码登记</button>`);
+  const btn = c.querySelector("button"), q = k => c.querySelector('[data-k="' + k + '"]').value;
+  btn.onclick = () => { btn.disabled = true; enrollPassword(q("who").trim(), q("pw"), q("again")).catch(e => { btn.disabled = false; fail(e); }); };
+}
+function enrollForm(state, me) {
+  const c = card(`<p><b>成为 vane 的签字人：登记这台电脑的 passkey</b>（每台电脑一次）</p>
+    <p class="muted">有 vane 的人都可以签；签 = 为你批准的东西负责。写下名字、按这台电脑的验证（Windows Hello PIN / 指纹 / Touch ID / USB 安全钥），会给出一段公钥和设备的证明（都不是秘密），贴回会话。
+    钥是用来挡住不稳定的 AI 的，不是用来挡人的：设备证明得了是硬件，当场就是签字人；证明不了，任一位签字人点一下确认你是人。</p>
+    <input placeholder="你的名字（GitHub 用户名）" autocomplete="username"><button>登记这台电脑的 passkey</button>`);
+  const btn = c.querySelector("button"), inp = c.querySelector("input");
+  btn.onclick = () => { btn.disabled = true; enroll(state, inp.value.trim(), me).catch(e => { btn.disabled = false; fail(e); }); };
+  passwordForm();
+}
+
+window.addEventListener("hashchange", () => location.reload());   // 已开着的页上换链接（只变 # 后面）也重读（2026-10-21 用户「nothing happen」）
+(async () => {
+  const state = await loadState();
+  STATE = state;
+  const me = rememberedMe(state);
+  document.getElementById("foot").textContent = "签字页 " + PAGE_VERSION + (state ? " · 页面 " + String(state.page || "").slice(0, 12) + "… · " + (state.box ? "箱 " + state.box : "装的时候那一版") +
+    " · 认的根签字人 " + (((state.roots || {}).signers || []).length) + " 位 · " + state.loader : " · 本机小服务没回话（不能自己更新）");
+  if (!window.PublicKeyCredential) return fail("这个浏览器不支持 passkey（要 Chrome / Edge / Safari 的新版本）");
+  if (location.hostname !== "localhost" && !CLOUD_HOSTS.includes(location.hostname))
+    return fail("要从 http://localhost:8765/（本机）或 https://mxx-yyl.github.io/signPage/（云端）打开（passkey 认的是这两处）");
+  if (CLOUD_HOSTS.includes(location.hostname))
+    document.getElementById("foot").textContent = "签字页 " + PAGE_VERSION + " · 云端签字页（GitHub Pages）· 没有本机小服务：签完把那段 JSON 贴回云会话";
+  let payload = null;
+  try { payload = await readPayload(); } catch (e) { return fail("链接读不动：" + e.message); }
+  if (payload && payload.release) {
+    const r = await considerRelease(state, payload.release, me);
+    if (r.status === "install") {
+      card(`<p class="okc"><b>签字页有新版本（箱 ${esc(r.manifest.box)}），根签字人 ${esc(r.by)} 签过 —— 正在换上…</b></p>`);
+      try { return await install(state, payload.release, payload.release.assertion, r.manifest); } catch (e) { fail(e); }
+    } else if (r.status === "needs-local") {
+      const c = card(`<p class="warn"><b>签字页有新版本（箱 ${esc(r.manifest.box)}）</b></p>
+        <p class="muted">这台电脑还不认任何根签字人（第一次装的时候名单是空的），所以由你自己决定要不要换：只在你知道 vane 刚登记了新的签字页时才换。不换也照样能签下面的东西。</p>
+        <button class="secondary">用我的 passkey 批准，换成新版</button>`);
+      const b = c.querySelector("button");
+      b.onclick = () => { b.disabled = true; approveLocally(state, payload.release, me, r.manifest).catch(e => { b.disabled = false; fail(e); }); };
+    } else if (r.status === "rejected") {
+      card(`<p class="warn"><b>链接带来的签字页新版本没有换上</b>：${esc(r.note)}。</p><p class="muted">下面照样用这台电脑上现在这一页签。</p>`);
+    }
+  }
+  if (payload && (payload.items || []).length) return showItems(payload.items, me, payload.ret, payload.pw);
+  if (payload && payload.release) return;
+  home(state, me);
+})().catch(fail);
+</script>
+</body>
+</html>

@@ -9,7 +9,8 @@
      验过根签字人签的发布单后把自己换成新版。没有任何秘密：私钥在设备里，这一页拿不到。算法与 software/src/vane/passkey.py 逐字相同：
        一件 challenge = sha256("vane-passkey-v1\n" + 命名空间 + "\n" + 文件的 sha256 十六进制)
        一批 challenge = sha256("vane-passkey-v1\nbatch\n" + 每件一行「命名空间 sha256」)
-       登记 challenge = sha256("vane-passkey-v1\nvane-signer-self\n" + 名字 + "\n" + nonce) -->
+       登记 challenge = sha256("vane-passkey-v1\nvane-signer-self\n" + 名字 + "\n" + nonce)
+     2.10.0 起还做第四件：setup 链接（`vane sign setup-link`）—— 人输一次密码，这台设备逐个名字新设 passkey，这一页用人的密码对每一份登记记录签担保。 -->
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#666;--card:#fff;--line:#ddd;--ok:#1f6f43;--bad:#9b2c2c;--warn:#8a5a00}
 @media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#eceae4;--muted:#a3a19a;--card:#21211f;--line:#3a3a36;--ok:#4cae7a;--bad:#e07070;--warn:#d9a441}}
@@ -38,7 +39,11 @@ textarea{width:100%;box-sizing:border-box;min-height:140px;font:12px/1.4 ui-mono
 </main>
 <script>
 "use strict";
-const PAGE_VERSION = "2.9.0";                            // 2.9.0（用户 2026-11-03「uva簽字默認在最後不是中間」「unfortunate no copy button」，memo D-252）：
+const PAGE_VERSION = "2.10.0";                           // 2.10.0（用户 2026-11-05「我的意思你發起 我用密碼一次你連續獲取兩次flyoc和susuqni的passkey指紋然後這兩個永久信任，
+                                                          // 後面再次setup就一直用同一種方法，這個頁面放在artifact下，每次setup用用好了，那個passkey就信任」）：setup 链接 ——
+                                                          // 输一次人的密码（对上链接带来的 PERSONS.json 那一把才往下走），逐个名字按一次新设 passkey，全设好由这一页用那把密码钥
+                                                          // 一次担保它们（vane-signer-enroll；记录的字节与 passkey.py 的 enroll_record() 逐字相同），贴回会话 `vane sign setup`。
+// 2.9.0                            // 2.9.0（用户 2026-11-03「uva簽字默認在最後不是中間」「unfortunate no copy button」，memo D-252）：
                                                           // 单选组里会话标了 def 的那一项预先选好（UVA 的「最后一次」）；签名经小服务送回 VM 却一件都没落（VM 那边没有这份文件，
                                                           // 例如云会话发起的请求），就照样给出那段 JSON 与「复制，贴回会话」—— 签名不丢。
                                                           // 同一版起这一页也是云端签字页（用户 2026-11-03「請你講雲端簽字改到github signPage repo上」）：
@@ -254,7 +259,7 @@ async function approveLocally(state, rel, me, m) {
 }
 
 // ---------------------------------------------------------------- 登记（每台电脑一次）
-async function enroll(state, who, me) {
+async function createPasskey(who) {                         // 这台设备新设一把 passkey -> 签字页「登记」那段 JSON（2.10.0 起 setup 也用它）
   if (!who) throw new Error("先写你的名字（GitHub 用户名或你在团队里的名字）");
   const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
   const cred = await navigator.credentials.create({publicKey: {
@@ -268,10 +273,13 @@ async function enroll(state, who, me) {
     hints: HINTS, timeout: 120000}});
   const spki = cred.response.getPublicKey();
   if (!spki) throw new Error("这个浏览器给不出公钥（要 Chrome / Edge 85、Safari 16 以上）");
-  const reg = {schema: "vane.passkey.signer.v1", principal: who, rpId: location.hostname, origin: location.origin, page: location.origin + "/",
+  return {schema: "vane.passkey.signer.v1", principal: who, rpId: location.hostname, origin: location.origin, page: location.origin + "/",
     credId: b64u(cred.rawId), alg: cred.response.getPublicKeyAlgorithm(), spki: b64(spki), fingerprint: hex(await sha256(spki)), nonce,
     attestationObject: b64u(cred.response.attestationObject), clientDataJSON: b64u(cred.response.clientDataJSON),
     transports: cred.response.getTransports ? cred.response.getTransports() : []};
+}
+async function enroll(state, who, me) {
+  const reg = await createPasskey(who);
   await rememberMe(state, reg);
   app.innerHTML = "";
   showEnrolled(reg, true);
@@ -417,6 +425,136 @@ async function showItems(items, me, ret, pwSigners) {
     .then(() => { pin.value = ""; }).catch(e => { pbtn.disabled = false; fail(e); }); };
 }
 
+// ---------------------------------------------------------------- 一次密码设 passkey（2.10.0，setup 链接；会话 `vane sign setup-link` 出）
+// 链接带 setup = {who: [名字…], rec: {schema, namespaces, note}}（rec 是会话那一版 passkey.py 写登记记录用的那几样）与人的密码钥 pw（只有公钥与盐）。
+// 人输一次密码 -> 对上 pw 里的一把才往下走；每个名字按一次（每次新设 passkey 都要人按一下：Safari 只认点出来的）；全设好（或「到这里就好」）
+// -> 这一页用那把密码钥对每一份登记记录签担保（一批，vane-signer-enroll）-> 一段 JSON 贴回会话 `vane sign setup '<JSON>'`。
+const ENROLL_NS = "vane-signer-enroll";
+function cborFmt(u) {                                       // 设备证明（attestationObject，CBOR 表）里的 fmt —— 只读这一格，别的跳过
+  let p = 0;
+  const need = n => { if (p + n > u.length) throw new Error("设备证明读不动（CBOR 截断）"); };
+  const head = () => {
+    need(1); const b = u[p++], mt = b >> 5, ai = b & 31; let n = ai;
+    if (ai === 24) { need(1); n = u[p++]; }
+    else if (ai === 25) { need(2); n = u[p] * 256 + u[p + 1]; p += 2; }
+    else if (ai === 26) { need(4); n = ((u[p] * 256 + u[p + 1]) * 256 + u[p + 2]) * 256 + u[p + 3]; p += 4; }
+    else if (ai > 26) throw new Error("设备证明读不动（CBOR 长度）");
+    return [mt, n];
+  };
+  const text = n => { need(n); const s = new TextDecoder().decode(u.subarray(p, p + n)); p += n; return s; };
+  const skip = () => {
+    const [mt, n] = head();
+    if (mt === 2 || mt === 3) { need(n); p += n; }
+    else if (mt === 4) for (let i = 0; i < n; i++) skip();
+    else if (mt === 5) for (let i = 0; i < 2 * n; i++) skip();
+    else if (mt === 6) skip();
+  };
+  const [mt, n] = head();
+  if (mt !== 5) throw new Error("设备证明不是 CBOR 表");
+  for (let i = 0; i < n; i++) {
+    const [kt, kn] = head();
+    const key = kt === 3 ? text(kn) : null;
+    if (kt === 2) { need(kn); p += kn; } else if (kt >= 4 && kt <= 6) throw new Error("设备证明的键不认得");
+    if (key === "fmt") { const [vt, vn] = head(); if (vt !== 3) throw new Error("设备证明的 fmt 不是文本"); return text(vn); }
+    skip();
+  }
+  throw new Error("设备证明里没有 fmt");
+}
+// 登记记录的字节：与 passkey.py 的 enroll_record() 逐字相同 —— json.dumps(doc, ensure_ascii=False, indent=1) + "\n"，键的次序也一样
+function recordText(reg, rec) {
+  const signer = {principal: reg.principal, rpId: reg.rpId, origin: reg.origin, credId: reg.credId, alg: reg.alg, spki: reg.spki, page: reg.page,
+                  fingerprint: reg.fingerprint, namespaces: rec.namespaces};
+  const doc = {schema: rec.schema, signer, attestation: {fmt: cborFmt(unb64u(reg.attestationObject)), attestationObject: reg.attestationObject,
+               clientDataJSON: reg.clientDataJSON, nonce: reg.nonce || ""}, note: rec.note};
+  return JSON.stringify(doc, null, 1) + "\n";
+}
+const slugOf = who => [...String(who)].map(ch => /[\p{L}\p{N}_-]/u.test(ch) ? ch : "-").slice(0, 40).join("") || "signer";
+async function pwMatch(pw, cands) {                         // 密码 -> 对得上指纹的那一把人的密码钥 {k（私钥只在这一页里）, c}
+  if (!pw) throw new Error("先输密码");
+  const note = card(`<p class="muted">正在用密码算钥（scrypt，几秒钟）……</p>`);
+  await tick();
+  try {
+    const cache = {};
+    for (const c of cands) {
+      const key = JSON.stringify(c.kdf);
+      const k = cache[key] || (cache[key] = await pwKey(pw, c.kdf));
+      if (k.fp === c.fingerprint) return {k, c};
+    }
+  } finally { note.remove(); }
+  throw new Error("密码不对（对不上链接带来的人的密码钥）");
+}
+function setupFlow(setup, pwSigners) {
+  const rec = setup && setup.rec;
+  if (!rec || rec.schema !== "vane.passkey.enrollment.v1" || !Array.isArray(rec.namespaces) || typeof rec.note !== "string")
+    return fail("setup 链接不完整（没带登记记录的格式）—— 请会话重出 `vane sign setup-link`");
+  const cands = (pwSigners || []).filter(x => x && x.credId && x.kdf && x.fingerprint);
+  if (!cands.length) return fail("setup 链接没带人的密码钥 —— 请会话重出 `vane sign setup-link`");
+  const names0 = (Array.isArray(setup.who) ? setup.who : []).map(s => String(s).trim()).filter(Boolean);
+  const c = card(`<p style="font-size:18px"><b>设这台设备的 passkey：输一次密码，再逐个按一下</b></p>
+    <p class="muted">每个名字在这台设备上新设一把 passkey（iCloud 钥匙串 / Windows Hello / 安全钥都行）；全设好，这一页用你的密码一次担保它们。
+    密码只在这台设备的浏览器里算钥、签担保，不发给任何地方。把最后给的那段 JSON 贴回会话，这几把当场就是签字人，之后签字按指纹就行。</p>
+    <p class="muted">要设的名字（逗号隔开，可以改）：</p><input data-k="who" autocomplete="off" value="${esc(names0.join(", "))}">
+    <p class="muted">担保用人的密码钥：${cands.map(x => esc(x.principal) + "（钥 <span class=\"mono\">" + esc(String(x.fingerprint).slice(0, 16)) + "…</span>）").join("、")}</p>
+    <input type="password" data-k="pw" autocomplete="current-password" placeholder="vane 的密码"><button data-k="go">验密码</button>`);
+  const who = c.querySelector('[data-k="who"]'), pin = c.querySelector('[data-k="pw"]'), go = c.querySelector('[data-k="go"]');
+  go.onclick = async () => {
+    go.disabled = true;
+    try {
+      const names = [...new Set(who.value.split(/[,，、\s]+/).map(s => s.trim()).filter(Boolean))];
+      if (!names.length) throw new Error("至少写一个名字");
+      if (names.length > 8) throw new Error("一次最多设 8 把");
+      const m = await pwMatch(pin.value, cands);
+      app.querySelectorAll(".card .err").forEach(e => e.closest(".card").remove());   // 先前输错的那几行收掉
+      pin.value = ""; pin.disabled = true; who.disabled = true;
+      go.textContent = "密码对了（" + m.c.principal + "）：下面逐个按";
+      setupSteps(names, m, rec);
+    } catch (e) { go.disabled = false; fail(e); }
+  };
+}
+function setupSteps(names, m, rec) {
+  const done = [];
+  let finished = false;
+  const rows = names.map((n, i) => {
+    const c = card(`<p><span class="tag">${i + 1}</span><b>${esc(n)}</b> · <span class="muted" data-k="st">等着</span></p>
+      <button data-k="b">设 ${esc(n)} 的 passkey</button>`);
+    return {n, b: c.querySelector('[data-k="b"]'), st: c.querySelector('[data-k="st"]')};
+  });
+  const tail = card(`<button class="secondary" data-k="early" disabled>到这里就好：担保已经设好的这几把</button>`);
+  const early = tail.querySelector('[data-k="early"]');
+  async function finish() {
+    if (finished || !done.length) return;
+    finished = true;
+    rows.forEach(r => { if (r.b.isConnected) r.b.disabled = true; });
+    tail.remove();
+    const items = done.map(d => ({ns: ENROLL_NS, sha: d.sha, file: d.file}));
+    const msg = concat(enc.encode(PW_PREFIX + "\n"), await sha256(enc.encode(chalTextOf(items))));
+    const sig = await crypto.subtle.sign({name: "Ed25519"}, m.k.priv, msg);
+    m.k = null;                                            // 签完就不留这把钥
+    const vouch = withItems({schema: "vane.passkey.assertion.v1", kind: "password", credId: m.c.credId, signature: b64u(sig), by: m.c.principal}, items);
+    for (const d of done) await rememberMe(STATE, d.reg);
+    out("设好了：把下面这段贴回会话（只这一次）", {schema: "vane.passkey.setup.v1", registrations: done.map(d => d.reg), vouch},
+      "这里是 " + done.length + " 把 passkey 的公钥与设备证明（" + done.map(d => d.reg.principal + " 钥 " + d.reg.fingerprint.slice(0, 16) + "…").join("；") +
+      "），加上你的密码对它们的担保；没有密码、没有私钥。会话 `vane sign setup '<JSON>'` 写登记记录、验担保 —— 验过，这几把当场是签字人。");
+  }
+  rows.forEach((r, i) => {
+    r.b.disabled = i > 0;
+    r.b.onclick = async () => {
+      r.b.disabled = true; early.disabled = true;           // 正在设的这一把没好之前不收尾（免得它落在担保外面）
+      try {
+        const reg = await createPasskey(r.n);
+        const text = recordText(reg, rec);
+        done.push({reg, sha: hex(await sha256(enc.encode(text))), file: "signers/" + slugOf(r.n) + "-" + reg.fingerprint.slice(0, 12) + ".json"});
+        r.st.textContent = "设好了：钥 " + reg.fingerprint.slice(0, 16) + "…";
+        r.st.className = "okc";
+        r.b.remove();
+        if (i + 1 < rows.length) { rows[i + 1].b.disabled = false; early.disabled = false; }
+        else await finish();
+      } catch (e) { if (!finished) { r.b.disabled = false; early.disabled = !done.length; } fail(e); }
+    };
+  });
+  early.onclick = () => finish().catch(fail);
+}
+
 // ---------------------------------------------------------------- 首页（没有链接时）
 function home(state, me) {
   if (me) {
@@ -479,6 +617,7 @@ window.addEventListener("hashchange", () => location.reload());   // 已开着�
       card(`<p class="warn"><b>链接带来的签字页新版本没有换上</b>：${esc(r.note)}。</p><p class="muted">下面照样用这台电脑上现在这一页签。</p>`);
     }
   }
+  if (payload && payload.setup) return setupFlow(payload.setup, payload.pw);   // 2.10.0：一次密码设 passkey
   if (payload && (payload.items || []).length) return showItems(payload.items, me, payload.ret, payload.pw);
   if (payload && payload.release) return;
   home(state, me);

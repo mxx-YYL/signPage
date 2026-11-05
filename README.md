@@ -2,13 +2,13 @@
 
 页面地址：**https://mxx-yyl.github.io/signPage/**
 
-这一页就是 vane 的签字页 `software/src/vane/signpage/index.html`（2.10.0），逐字节同一份：
+这一页就是 vane 的签字页 `software/src/vane/signpage/index.html`（2.11.0），逐字节同一份：
 
 | 文件 | sha256 |
 |---|---|
-| `index.html` | `8b87eea50d9e9693f7c534039ad549d7f240ef68868cd622de24a6fda2aa76d2` |
+| `index.html` | `201c45cb5031e687188cfd6b048a9b896b337c8932cf8017a3c88041f348ad2f` |
 
-vane 那边：登记 `95d5e093c522`（2026-11-05，flyoc 用 iCloud passkey 签的许可）把这一份字节封进箱 `95d5e093c522`。
+vane 那边：登记 `4b729ab55f96`（2026-11-05，susuqni 用 iCloud passkey 签的许可 —— 那把 passkey 是在这一页的 setup 上设、由人的密码担保的）把这一份字节封进箱 `4b729ab55f96`。
 
 ## 规矩
 
@@ -16,7 +16,7 @@ vane 那边：登记 `95d5e093c522`（2026-11-05，flyoc 用 iCloud passkey 签�
 
 - **密码只放权**：人（vane 的唯一密码，PERSONS.json 里那把密码钥）只用来担保新设的 passkey —— 下面的「设 passkey」。
 - **签字一律用 passkey**：云端用这一页上设的 passkey（iCloud 钥匙串），电脑上用本机签字页的 passkey。
-- 2.10.0 的页面上「或者：输密码签」还在（担保时要用）；签别的东西请按「用 passkey 签」。
+- 2.11.0 起，「或者：输密码签（放权）」只在这一批全是担保时出现；许可、线的许可、发布……这一页只给「用 passkey 签」。
 
 ## 设 passkey（2.10.0 起）
 

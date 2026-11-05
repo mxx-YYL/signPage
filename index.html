@@ -39,7 +39,9 @@ textarea{width:100%;box-sizing:border-box;min-height:140px;font:12px/1.4 ui-mono
 </main>
 <script>
 "use strict";
-const PAGE_VERSION = "2.10.0";                           // 2.10.0（用户 2026-11-05「我的意思你發起 我用密碼一次你連續獲取兩次flyoc和susuqni的passkey指紋然後這兩個永久信任，
+const PAGE_VERSION = "2.11.0";                           // 2.11.0（用户 2026-11-05「密碼只放權，簽字永遠用passkey，passkey要麼雲端的icloud要麼本地的，
+                                                          // 密碼就是唯一的最高權限，除了放權它一般不簽名」）：「输密码签」只在这一批全是担保（vane-signer-enroll）时出现
+// 2.10.0                           // 2.10.0（用户 2026-11-05「我的意思你發起 我用密碼一次你連續獲取兩次flyoc和susuqni的passkey指紋然後這兩個永久信任，
                                                           // 後面再次setup就一直用同一種方法，這個頁面放在artifact下，每次setup用用好了，那個passkey就信任」）：setup 链接 ——
                                                           // 输一次人的密码（对上链接带来的 PERSONS.json 那一把才往下走），逐个名字按一次新设 passkey，全设好由这一页用那把密码钥
                                                           // 一次担保它们（vane-signer-enroll；记录的字节与 passkey.py 的 enroll_record() 逐字相同），贴回会话 `vane sign setup`。
@@ -405,23 +407,34 @@ async function showItems(items, me, ret, pwSigners) {
   });
   const c = card(`<button></button><p class="muted">用你自己的 passkey 签：这台电脑上登记过的谁都可以（${me ? "最近登记的是 " + esc(me.principal) + "；" : ""}会话那边按钥认签字人）</p>`);
   const btn = c.querySelector("button");
-  // 2.6.0：或者输密码签（链接带来的被信任的密码钥 + 这台电脑上登记过的；只有公钥与盐）
-  const seen = new Set(), cands = (pwSigners || []).concat(rememberedPw()).filter(x => x && x.credId && !seen.has(x.credId) && seen.add(x.credId));
-  const pc = card(`<p><b>或者：输密码签</b></p><p class="muted">${cands.length ? "密码只在这台电脑的浏览器里用来签名，不发给任何地方。" +
-    "（登记过的密码钥：" + cands.map(x => esc(x.principal)).join("、") + "）" : "还没有登记过密码钥：首页「设一个密码」登记一把，用 passkey 担保一次以后就能用密码签。"}</p>
-    <input type="password" autocomplete="current-password" placeholder="你的 vane 签字密码"><button class="secondary"></button>`);
-  const pin = pc.querySelector("input"), pbtn = pc.querySelector("button");
-  if (!cands.length) { pin.disabled = true; }
+  // 2.6.0：或者输密码签（链接带来的被信任的密码钥 + 这台电脑上登记过的；只有公钥与盐）。
+  // 2.11.0（用户 2026-11-05「密碼只放權，簽字永遠用passkey … 除了放權它一般不簽名」）：只在这一批全是担保（vane-signer-enroll）时出现 ——
+  // 密码只用来放权；别的一律按 passkey 签。
+  const delegating = ready.length > 0 && ready.every(it => it.ns === ENROLL_NS);
+  let pin = null, pbtn = null, cands = [];
+  if (delegating) {
+    const seen = new Set();
+    cands = (pwSigners || []).concat(rememberedPw()).filter(x => x && x.credId && !seen.has(x.credId) && seen.add(x.credId));
+    const pc = card(`<p><b>或者：输密码签（放权）</b></p><p class="muted">${cands.length ? "这一批全是担保：可以用人的密码签。密码只在这台电脑的浏览器里用来签名，不发给任何地方。" +
+      "（登记过的密码钥：" + cands.map(x => esc(x.principal)).join("、") + "）" : "还没有登记过密码钥。"}</p>
+      <input type="password" autocomplete="current-password" placeholder="vane 的密码"><button class="secondary"></button>`);
+    pin = pc.querySelector("input"); pbtn = pc.querySelector("button");
+    if (!cands.length) { pin.disabled = true; }
+  } else {
+    card(`<p class="muted">签字用 passkey。密码只放权：只在担保 passkey 时出现（设 passkey 用会话给的 setup 链接）。</p>`);
+  }
   function update() {
     const left = groups.filter(g => !picked[g]).length;
     btn.disabled = left > 0;
     btn.textContent = left ? "先在单选里选一项" : (n === 1 ? "用 passkey 签这一件" : "用 passkey 一次签这 " + n + " 件") + "（Windows Hello / Touch ID / PIN）";
-    pbtn.disabled = left > 0 || !cands.length;
-    pbtn.textContent = left ? "先在单选里选一项" : (n === 1 ? "用密码签这一件" : "用密码一次签这 " + n + " 件");
+    if (pbtn) {
+      pbtn.disabled = left > 0 || !cands.length;
+      pbtn.textContent = left ? "先在单选里选一项" : (n === 1 ? "用密码签这一件" : "用密码一次签这 " + n + " 件");
+    }
   }
   update();
   btn.onclick = () => { btn.disabled = true; sign(plain.concat(groups.map(g => picked[g])), me, ret).catch(e => { btn.disabled = false; fail(e); }); };
-  pbtn.onclick = () => { pbtn.disabled = true; signWithPassword(plain.concat(groups.map(g => picked[g])), pin.value, cands, ret)
+  if (pbtn) pbtn.onclick = () => { pbtn.disabled = true; signWithPassword(plain.concat(groups.map(g => picked[g])), pin.value, cands, ret)
     .then(() => { pin.value = ""; }).catch(e => { pbtn.disabled = false; fail(e); }); };
 }
 

@@ -2,7 +2,9 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
 <title>vane 签字</title>
 <!-- vane 的签名：签字人的 passkey（WebAuthn，memo D-187 / D-188）。这一页由签字人电脑上的本机小服务（setup.bat / setup.sh 装一次，开机自己起）在
      http://localhost:8765/ 发，只做三件事：登记这台电脑的 passkey（带设备的硬件证明）、把会话链接里带来的东西原样摆出来让人读了再签（一次签完一批）、
@@ -10,36 +12,260 @@
        一件 challenge = sha256("vane-passkey-v1\n" + 命名空间 + "\n" + 文件的 sha256 十六进制)
        一批 challenge = sha256("vane-passkey-v1\nbatch\n" + 每件一行「命名空间 sha256」)
        登记 challenge = sha256("vane-passkey-v1\nvane-signer-self\n" + 名字 + "\n" + nonce)
-     2.10.0 起还做第四件：setup 链接（`vane sign setup-link`）—— 人输一次密码，这台设备逐个名字新设 passkey，这一页用人的密码对每一份登记记录签担保。 -->
+     2.10.0 起还做第四件：setup 链接（`vane sign setup-link`）—— 人输一次密码，这台设备逐个名字新设 passkey，这一页用人的密码对每一份登记记录签担保。
+     2.12.0 起界面整个重画（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：签法、签的字节、给出的 JSON 一样不变；
+     批准件每件一个勾（默认勾上，去掉的这次不签、留着下次）；单选按线归拢，每一问都预先选好建议项、写明为什么；签完自动复制那段 JSON。
+     同一份字节也是云端签字页 https://mxx-yyl.github.io/signPage/（memo D-252）。 -->
 <style>
-:root{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#666;--card:#fff;--line:#ddd;--ok:#1f6f43;--bad:#9b2c2c;--warn:#8a5a00}
-@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#eceae4;--muted:#a3a19a;--card:#21211f;--line:#3a3a36;--ok:#4cae7a;--bad:#e07070;--warn:#d9a441}}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 -apple-system,system-ui,sans-serif}
-main{max-width:720px;margin:0 auto;padding:20px 16px 48px}
-h1{font-size:22px;margin:8px 0 4px}p{margin:8px 0}.muted{color:var(--muted);font-size:14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:14px 0}
-code,.mono{font:13px/1.45 ui-monospace,Menlo,monospace;word-break:break-all}
-pre.doc{white-space:pre-wrap;max-height:45vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0 0}
-button{font:inherit;font-size:17px;padding:12px 18px;border-radius:10px;border:0;background:var(--ok);color:#fff;width:100%;margin-top:8px;cursor:pointer}
-button.secondary{background:transparent;color:var(--fg);border:1px solid var(--line)}
-button:disabled{opacity:.5;cursor:default}
-input{width:100%;box-sizing:border-box;font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
-textarea{width:100%;box-sizing:border-box;min-height:140px;font:12px/1.4 ui-monospace,Menlo,monospace;border-radius:8px;border:1px solid var(--line);
-  background:var(--bg);color:var(--fg);padding:8px}
-.err{color:var(--bad)}.okc{color:var(--ok)}.warn{color:var(--warn)}
-.tag{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:0 6px;margin-right:6px;color:var(--muted)}
+:root{
+  --bg:#f5f3ee;--bg-top:#ebe9e1;--surface:#fffefb;--surface-2:#f7f5ef;--fg:#1c1b18;--fg-2:#3f3d37;--muted:#6e6b62;--faint:#a29e93;
+  --line:#e5e1d6;--line-2:#d4cfc2;
+  --accent:#1f6d48;--accent-hi:#185a3b;--on-accent:#fff;--accent-soft:#e5f1e9;--accent-line:#b7d6c3;
+  --sugg:#6a4fb0;--sugg-soft:#f1ecfb;--sugg-line:#d9cdf2;
+  --warn:#8d5b00;--warn-soft:#fbf2df;--warn-line:#ecd6a6;
+  --bad:#a63d3a;--bad-soft:#f9e6e4;--bad-line:#ebc0bb;
+  --info:#2d5b88;--info-soft:#e7eef7;--info-line:#c2d4e8;
+  --shadow:0 1px 1px rgba(40,32,10,.04),0 6px 20px -10px rgba(40,32,10,.16);
+  --r:16px;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC","Source Han Sans SC",system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#121311;--bg-top:#1a1b18;--surface:#1c1d1a;--surface-2:#23241f;--fg:#ecebe6;--fg-2:#cfcdc6;--muted:#a19e95;--faint:#77746c;
+  --line:#2f312c;--line-2:#3d3f39;
+  --accent:#48b57d;--accent-hi:#5cc790;--on-accent:#06170e;--accent-soft:#15291e;--accent-line:#2b5a40;
+  --sugg:#b7a2f2;--sugg-soft:#231d35;--sugg-line:#45396b;
+  --warn:#e2b055;--warn-soft:#2a2213;--warn-line:#5a4621;
+  --bad:#ee8f88;--bad-soft:#301b19;--bad-line:#65332f;
+  --info:#90badf;--info-soft:#16212d;--info-line:#2e4761;
+  --shadow:0 1px 1px rgba(0,0,0,.3),0 10px 26px -12px rgba(0,0,0,.6);
+}}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{margin:0;min-height:100vh;background:var(--bg) linear-gradient(var(--bg-top),var(--bg) 340px) no-repeat;color:var(--fg);font:15px/1.62 var(--sans);
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+button,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+.shell{max-width:760px;margin:0 auto;padding:max(12px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left))}
+.mono{font-family:var(--mono);font-size:.88em;word-break:break-all}
+.muted{color:var(--muted)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px 14px;flex-wrap:wrap;padding:6px 0 4px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.mark{width:34px;height:34px;flex:none;border-radius:10px;background:var(--fg);color:var(--bg);display:grid;place-items:center}
+.mark svg{width:22px;height:22px}
+.brand-name{font-weight:700;font-size:17px;letter-spacing:.01em}
+.brand-alt{font-size:12px;color:var(--muted);border:1px solid var(--line-2);border-radius:999px;padding:0 8px;line-height:20px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;min-width:0}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:999px;background:var(--surface);border:1px solid var(--line);
+  font-size:12.5px;color:var(--fg-2);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.chip svg{width:14px;height:14px;flex:none;color:var(--muted)}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.chip.ok .dot{background:var(--accent)}.chip.warn .dot{background:var(--warn)}
+.chip.ok svg{color:var(--accent)}
+.hero{padding:22px 2px 2px}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--muted)}
+.hero h1{font-size:28px;line-height:1.22;letter-spacing:-.015em;margin:6px 0 8px;font-weight:750}
+.hero h1 .n{color:var(--accent)}
+.lede{margin:0;color:var(--fg-2);max-width:62ch}
+.stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.stat{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:12px;background:var(--surface);border:1px solid var(--line);font-size:13px;color:var(--fg-2)}
+.stat b{font-size:15px;color:var(--fg)}
+.stat svg{width:15px;height:15px;color:var(--muted)}
+.stat.sugg{background:var(--sugg-soft);border-color:var(--sugg-line);color:var(--sugg)}
+.stat.sugg b,.stat.sugg svg{color:var(--sugg)}
+.stat.need{background:var(--warn-soft);border-color:var(--warn-line);color:var(--warn)}
+.stat.need b{color:var(--warn)}
+.block{margin:24px 0 0}
+.block-head{display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;margin:0 2px 4px}
+.block-head h2{margin:0;font-size:13px;font-weight:700;letter-spacing:.06em;color:var(--muted)}
+.block-hint{margin:0 2px 10px;font-size:13px;color:var(--muted)}
+.linkbtn{background:none;border:0;padding:2px 0;color:var(--accent);font-size:13.5px;font-weight:600;cursor:pointer;border-radius:6px}
+.linkbtn:hover:not(:disabled){text-decoration:underline;text-underline-offset:3px}
+.linkbtn:disabled{color:var(--faint);cursor:default}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;box-shadow:var(--shadow);margin-top:14px}
+.card h3{margin:0 0 4px;font-size:16px;line-height:1.4}
+.card>p{margin:6px 0 0}
+details.card>summary{display:flex;align-items:center;gap:6px;cursor:pointer;list-style:none;font-weight:650}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary svg{width:16px;height:16px;color:var(--muted);transition:transform .15s}
+details.card[open]>summary svg{transform:rotate(90deg)}
+.items{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.item{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px 16px 12px;box-shadow:var(--shadow);transition:border-color .15s,background-color .15s}
+.item.on{border-color:var(--accent-line)}
+.item.off{background:var(--surface-2);box-shadow:none}
+.item.off .ask,.item.off .meta,.item.off .enroll{opacity:.55}
+.cb{appearance:none;-webkit-appearance:none;margin:2px 0 0;width:24px;height:24px;border-radius:8px;border:1.6px solid var(--line-2);background:var(--surface);
+  display:grid;place-content:center;cursor:pointer;transition:background-color .12s,border-color .12s}
+.cb::after{content:"";width:6px;height:11px;border:solid transparent;border-width:0 2.6px 2.6px 0;transform:translateY(-1px) rotate(45deg)}
+.cb:checked{background:var(--accent);border-color:var(--accent)}
+.cb:checked::after{border-color:var(--on-accent)}
+.cb:disabled{cursor:default;opacity:.75}
+.item-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.num{font:600 11.5px/20px var(--mono);color:var(--muted);min-width:16px}
+.tag{font-size:12px;line-height:20px;padding:0 8px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line);color:var(--fg-2)}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;line-height:20px;padding:0 8px;border-radius:999px;border:1px solid}
+.badge.ok{color:var(--accent);background:var(--accent-soft);border-color:var(--accent-line)}
+.badge.warn{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-line)}
+.badge.info{color:var(--info);background:var(--info-soft);border-color:var(--info-line)}
+.ask{display:block;font-size:16px;font-weight:650;line-height:1.45;cursor:pointer;margin:4px 0 4px;word-break:break-word}
+.meta{color:var(--muted);font-size:12px;line-height:1.5}
+.enroll{margin:6px 0;padding:10px 12px;border-radius:10px;background:var(--warn-soft);border:1px solid var(--warn-line);font-size:14px}
+.enroll p{margin:4px 0 0;font-size:13px;color:var(--fg-2)}
+details.raw{margin-top:6px}
+details.raw>summary{display:inline-flex;align-items:center;gap:4px;cursor:pointer;list-style:none;color:var(--muted);font-size:13px;padding:2px 0;border-radius:6px}
+details.raw>summary::-webkit-details-marker{display:none}
+details.raw>summary svg{width:14px;height:14px;transition:transform .15s}
+details.raw[open]>summary svg{transform:rotate(90deg)}
+details.raw>summary:hover{color:var(--fg)}
+pre.doc{white-space:pre-wrap;word-break:break-word;max-height:46vh;overflow:auto;margin:8px 0 0;padding:10px 12px;border-radius:10px;background:var(--surface-2);
+  border:1px solid var(--line);font:12.5px/1.55 var(--mono);color:var(--fg-2)}
+.rawopt{margin-top:10px}
+.lines{display:grid;gap:12px}
+.line{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+.line-head{display:flex;align-items:baseline;justify-content:space-between;gap:2px 12px;flex-wrap:wrap;padding:11px 18px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.line-name{font:700 14.5px/1.4 var(--mono);word-break:break-all}
+.line-ctx{font-size:12.5px;color:var(--muted)}
+.q{padding:14px 18px}
+.q+.q{border-top:1px dashed var(--line)}
+.q-head{display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap}
+.q-title{font-weight:650;font-size:14.5px}
+.sugg{display:inline-flex;align-items:flex-start;gap:6px;max-width:100%;font-size:12.5px;color:var(--sugg);background:var(--sugg-soft);border:1px solid var(--sugg-line);
+  border-radius:12px;padding:1px 10px;line-height:20px}
+.sugg>span{min-width:0}
+.sugg svg{width:12px;height:12px;flex:none;margin-top:4px}
+.sugg.changed{color:var(--fg-2);background:var(--surface-2);border-color:var(--line)}
+.sugg.need{color:var(--warn);background:var(--warn-soft);border-color:var(--warn-line)}
+.sugg .linkbtn{font-size:12.5px;padding:0}
+.opts{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+.opt{position:relative;display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:7px 15px;border-radius:999px;border:1.5px solid var(--line-2);
+  background:var(--surface);cursor:pointer;font-size:14px;line-height:1.3;user-select:none;-webkit-user-select:none;transition:border-color .12s,background-color .12s}
+.opt:hover{border-color:var(--faint)}
+.opt input{position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
+.opt .tick{display:none;width:15px;height:15px;flex:none;color:var(--accent)}
+.opt .sp{width:11px;height:11px;flex:none;color:var(--sugg)}
+.opt.sel{border-color:var(--accent);background:var(--accent-soft);font-weight:650}
+.opt.sel .tick{display:inline-block}
+.opt.focus{outline:2px solid var(--accent);outline-offset:2px}
+.opt.locked{cursor:default}
+.opt.locked:not(.sel){opacity:.5}
+.q-desc{margin:8px 0 0;font-size:13px;color:var(--muted);line-height:1.55}
+.prop{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;margin-top:10px;padding:9px 12px;border-radius:10px;background:var(--info-soft);border:1px solid var(--info-line);
+  font-size:13px;color:var(--fg-2)}
+.prop svg{width:15px;height:15px;color:var(--info);flex:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;border:1px solid transparent;border-radius:12px;padding:10px 16px;font-weight:600;font-size:15px;
+  line-height:1.3;cursor:pointer;text-align:center;transition:background-color .12s,border-color .12s,transform .06s}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn svg{width:18px;height:18px;flex:none}
+.btn.primary{background:var(--accent);color:var(--on-accent);box-shadow:0 10px 22px -14px var(--accent)}
+.btn.primary:hover:not(:disabled){background:var(--accent-hi)}
+.btn.big{width:100%;min-height:54px;font-size:16.5px;border-radius:14px}
+.btn.big svg{width:20px;height:20px}
+.btn.ghost{background:var(--surface);border-color:var(--line-2);color:var(--fg)}
+.btn.ghost:hover:not(:disabled){border-color:var(--faint)}
+.btn.small{padding:6px 12px;font-size:13px;border-radius:9px}
+.btn.small svg{width:15px;height:15px}
+.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.btnrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.actionbar{position:sticky;bottom:0;z-index:5;margin:24px -16px 0;padding:12px 16px max(14px,env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+@supports ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){
+  .actionbar{background:color-mix(in srgb,var(--bg) 84%,transparent);-webkit-backdrop-filter:saturate(1.5) blur(14px);backdrop-filter:saturate(1.5) blur(14px)}}
+.actionbar.done{position:static;background:transparent;-webkit-backdrop-filter:none;backdrop-filter:none}
+.sumline{display:flex;align-items:baseline;justify-content:space-between;gap:2px 12px;flex-wrap:wrap;margin:0 2px 10px;font-size:13.5px;color:var(--fg-2)}
+.sumline b{color:var(--fg)}
+.okline{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:650}
+.okline svg{width:16px;height:16px}
+.sub{margin:7px 2px 0;font-size:12.5px;color:var(--muted);line-height:1.45;text-align:center}
+.note{margin:18px 2px 0;font-size:12.5px;color:var(--muted);line-height:1.55}
+.pwblock .input{margin-top:10px}
+.notice{display:flex;align-items:flex-start;gap:10px;margin:12px 0;padding:12px 14px;border-radius:12px;border:1px solid;font-size:14px;line-height:1.55}
+.notice>svg{width:18px;height:18px;flex:none;margin-top:2px}
+.notice .nb{min-width:0;flex:1;word-break:break-word}
+.notice .nb>b{display:block;margin-bottom:2px}
+.notice .nb p{margin:4px 0 0}
+.notice.ok{background:var(--accent-soft);border-color:var(--accent-line)}.notice.ok>svg{color:var(--accent)}
+.notice.warn{background:var(--warn-soft);border-color:var(--warn-line)}.notice.warn>svg{color:var(--warn)}
+.notice.bad{background:var(--bad-soft);border-color:var(--bad-line)}.notice.bad>svg{color:var(--bad)}
+.notice.info{background:var(--info-soft);border-color:var(--info-line)}.notice.info>svg{color:var(--info)}
+.notice .btnrow{margin-top:10px}
+.spin{width:16px;height:16px;flex:none;margin-top:3px;border-radius:50%;border:2px solid var(--info-line);border-top-color:var(--info);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.outcomes{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.outcomes li{display:flex;gap:6px;align-items:flex-start}
+.outcomes svg{width:15px;height:15px;flex:none;margin-top:4px}
+.outcomes .ok svg{color:var(--accent)}.outcomes .bad svg{color:var(--bad)}
+.results:empty{display:none}
+.result{margin:16px 0 0;padding:18px;border-radius:var(--r);background:var(--surface);border:1px solid var(--accent-line);box-shadow:var(--shadow)}
+.result-head{display:flex;gap:12px;align-items:flex-start;margin-bottom:14px}
+.badge-ic{width:38px;height:38px;flex:none;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:var(--on-accent)}
+.badge-ic svg{width:22px;height:22px}
+.result h2{margin:0;font-size:17px;line-height:1.4}
+.result-head p{margin:4px 0 0;font-size:13.5px;color:var(--muted)}
+.copystate{margin:10px 2px 0;font-size:13.5px;color:var(--accent);font-weight:600}
+.copystate:empty{display:none}
+textarea.json{display:block;width:100%;min-height:120px;margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);
+  font:12px/1.45 var(--mono);color:var(--fg-2);resize:vertical}
+.field{display:grid;gap:6px;margin:12px 0 0}
+.field>span{font-size:13px;color:var(--muted)}
+.input{width:100%;min-height:44px;padding:10px 12px;border-radius:11px;border:1px solid var(--line-2);background:var(--surface);font-size:15px}
+.input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.input:disabled{opacity:.6}
+.steps{display:flex;gap:8px;margin:16px 0 0;padding:0;list-style:none;counter-reset:s}
+.steps li{flex:1;min-width:0;display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);padding:8px 10px;border-radius:11px;background:var(--surface);border:1px solid var(--line)}
+.steps li::before{counter-increment:s;content:counter(s);width:22px;height:22px;flex:none;border-radius:50%;display:grid;place-items:center;font:700 12px/1 var(--mono);
+  background:var(--surface-2);border:1px solid var(--line-2)}
+.steps li.now{color:var(--fg);border-color:var(--accent-line);background:var(--accent-soft)}
+.steps li.now::before{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.steps li.done::before{content:"✓";background:var(--accent-soft);color:var(--accent);border-color:var(--accent-line)}
+.setrow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 0}
+.setrow+.setrow{border-top:1px dashed var(--line)}
+.setrow .who{display:flex;align-items:center;gap:10px;font-weight:650;min-width:0;flex-wrap:wrap}
+.pill{font-size:12px;line-height:20px;padding:0 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:var(--surface-2);font-weight:500}
+.pill.ok{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)}
+.pill.busy{color:var(--info);border-color:var(--info-line);background:var(--info-soft)}
+.status-row{display:flex;gap:12px;align-items:center}
+.how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+.how div{padding:12px 14px;border-radius:12px;background:var(--surface);border:1px solid var(--line);font-size:13px;color:var(--fg-2)}
+.how b{display:block;font-size:14px;color:var(--fg);margin-bottom:2px}
+.foot{margin:28px 2px 0;padding:14px 0 calc(18px + env(safe-area-inset-bottom));border-top:1px solid var(--line);color:var(--faint);font-size:11.5px;line-height:1.6}
+@media (max-width:560px){
+  body{font-size:14.5px}
+  .hero{padding-top:14px}
+  .hero h1{font-size:23px}
+  .item{padding:12px 13px 10px;gap:4px 11px}
+  .ask{font-size:15px}
+  .q,.line-head{padding-left:14px;padding-right:14px}
+  .card{padding:14px}
+  .how{grid-template-columns:1fr}
+  .steps li{font-size:12px;padding:7px 8px}
+  .actionbar{padding-top:10px}
+  .sumline{font-size:13px;margin-bottom:8px}
+  .btn.big{min-height:50px;font-size:16px}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important}.spin{animation-duration:2.4s}}
 </style>
 </head>
 <body>
-<main>
-<h1>vane 签字</h1>
-<p class="muted">用这台电脑自己的验证：Windows Hello（PIN / 指纹 / 人脸）、Touch ID 或 USB 安全钥。私钥在设备里，这一页拿不到。签什么，都原样摆在下面。</p>
-<div id="app"></div>
-<p class="muted mono" id="foot"></p>
-</main>
+<div class="shell">
+<header class="top">
+  <div class="brand"><span class="mark" id="mark"></span><span class="brand-name">vane 签字</span><span class="brand-alt">塞音</span></div>
+  <div class="chips" id="chips"></div>
+</header>
+<div id="banner"></div>
+<main id="app"></main>
+<footer class="foot mono" id="foot"></footer>
+</div>
+<noscript><p style="padding:16px">这一页要 JavaScript 才能签字。</p></noscript>
 <script>
 "use strict";
-const PAGE_VERSION = "2.11.0";                           // 2.11.0（用户 2026-11-05「密碼只放權，簽字永遠用passkey，passkey要麼雲端的icloud要麼本地的，
+const PAGE_VERSION = "2.12.0";                           // 2.12.0（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：
+                                                          // 界面整个重画 —— 签法、签的字节、给出的 JSON 一样不变（challenge / 断言 / 登记 / setup 的代码原样搬过来）；
+                                                          // 批准件每件一个勾（默认勾上；去掉的这次不签、留着下次）；单选按线归拢，每一问都预先选好建议项并写明为什么
+                                                          // （会话标的默认，连同会话给的理由 > 不放宽 / 照原来的做法），改了一条线可以一键带上同一批的其余线；
+                                                          // 指控方的默认由会话按「上一次做过了就默认不选」给（用户 2026-11-06「如果上一次做過了默認就不選」，passkey 2.7.0）；
+                                                          // 签完自动复制那段 JSON；passkey 出错说人话，用不了 passkey 的浏览器给「复制链接」到 Safari / Chrome 打开。
+// 2.11.0                           // 2.11.0（用户 2026-11-05「密碼只放權，簽字永遠用passkey，passkey要麼雲端的icloud要麼本地的，
                                                           // 密碼就是唯一的最高權限，除了放權它一般不簽名」）：「输密码签」只在这一批全是担保（vane-signer-enroll）时出现
 // 2.10.0                           // 2.10.0（用户 2026-11-05「我的意思你發起 我用密碼一次你連續獲取兩次flyoc和susuqni的passkey指紋然後這兩個永久信任，
                                                           // 後面再次setup就一直用同一種方法，這個頁面放在artifact下，每次setup用用好了，那個passkey就信任」）：setup 链接 ——
@@ -60,6 +286,7 @@ const CLOUD_HOSTS = ["mxx-yyl.github.io"];               // 2.9.0：云端签字
 let STATE = null;                                         // 本机小服务的 /vane/state（2.2.0：带 relay = 它能把签名经 ssh 送回 VM）
 const PREFIX = "vane-passkey-v1";
 const PAGE_NS = "vane-signpage";
+const ENROLL_NS = "vane-signer-enroll";
 const NS_LABEL = {
   "vane-gates-permit": "登记许可（改了 vane 的门 / 工具 / 签字的规矩）",
   "vane-carry-contract": "承接契约",
@@ -68,16 +295,18 @@ const NS_LABEL = {
   "vane-signpage": "签字页的新版本（签了，签字人电脑上的签字页会换成这一版；只有根签字人签的才算）",
   "vane-fbi-seal": "FBI 的一个版本（签了，fbi/ 这一版的代码与规矩封成只读的 FBI 箱）",
   "vane-release": "批准一次发布（签了，这一份交付卷宗 RELEASE.toml 就是批准过的那一份，S11 才推给客户）"};
+const NS_SHORT = {"vane-gates-permit": "登记许可", "vane-carry-contract": "承接契约", "vane-line-allow": "线的许可", "vane-signer-enroll": "担保签字人",
+  "vane-signpage": "签字页新版", "vane-fbi-seal": "FBI 封箱", "vane-release": "批准发布"};
 const ALL_NS = Object.keys(NS_LABEL);
 const HINTS = ["client-device", "security-key"];        // 先用这台电脑自己的验证，不弹「用手机扫码」（用户 2026-10-21「password Touch ID but no face」）
 const app = document.getElementById("app");
+const banner = document.getElementById("banner");
 const enc = new TextEncoder();
 const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), c => c.charCodeAt(0));
 const b64 = buf => { let s = ""; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
 const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 const hex = buf => [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2, "0")).join("");
-const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const sha256 = data => crypto.subtle.digest("SHA-256", data);
 const concat = (a, b) => { const o = new Uint8Array(a.byteLength + b.byteLength); o.set(new Uint8Array(a), 0); o.set(new Uint8Array(b), a.byteLength); return o; };
 const tick = () => new Promise(r => setTimeout(r, 30));     // 让「正在算」先画出来
@@ -149,19 +378,132 @@ function rememberPw(reg) {
   try { localStorage.setItem("vane.pwsigners", JSON.stringify(rememberedPw().filter(x => x.credId !== keep.credId).concat([keep]))); } catch (e) {}
 }
 
-function card(html) { app.insertAdjacentHTML("beforeend", `<div class="card">${html}</div>`); return app.lastElementChild; }
-function fail(e) { card(`<p class="err">没成：${esc(e && e.message || e)}</p>`); }
-function out(title, obj, note) {
+// ---------------------------------------------------------------- 界面零件（2.12.0）：一律用 DOM 节点、textContent 摆字 —— 链接带来的原文一个字都不当 HTML 解释
+const ICONS = {
+  mark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8.5h14"/><path d="M14.5 5L19 8.5 14.5 12"/><path d="M4 8.5L2.6 6M4 8.5L2.6 11"/><path d="M11 8.5V20.5"/><path d="M7.5 20.5h7"/><circle cx="11" cy="15" r="1.2"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.3 4.3L19 7"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>',
+  warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.8L2.9 19.5h18.2z"/><path d="M12 10v4.3"/><path d="M12 17.1v.1"/></svg>',
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.7v.1"/></svg>',
+  spark: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l2.2 6.4 6.3 2.3-6.3 2.3L12 19.9l-2.2-6.4-6.3-2.3 6.3-2.3z"/><path d="M19 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.2"/><path d="M15.5 8.5V6a1.8 1.8 0 0 0-1.8-1.8H6a1.8 1.8 0 0 0-1.8 1.8v7.7A1.8 1.8 0 0 0 6 15.5h2.5"/></svg>',
+  chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6l6 6-6 6"/></svg>',
+  key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15.5" r="4.2"/><path d="M11 12.5L20 3.5"/><path d="M16.8 6.7l2.6 2.6"/><path d="M14.4 9.1l2 2"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.2"/><path d="M8.2 10.5V7.6a3.8 3.8 0 0 1 7.6 0v2.9"/></svg>',
+  cloud: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.2 18.5h10.3a4 4 0 0 0 .5-8 6 6 0 0 0-11.4-1.4A4.7 4.7 0 0 0 7.2 18.5z"/></svg>',
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8.3" r="3.8"/><path d="M4.6 20a7.4 7.4 0 0 1 14.8 0"/></svg>',
+  doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5h7.5l4 4v12.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M14 3.5V8h4"/><path d="M9 12.5h6M9 16h6"/></svg>',
+  fork: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5.5" r="2"/><circle cx="6" cy="18.5" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7.5v9"/><path d="M8 6c5 .5 6.5 3 8 4.6M8 18c5-.5 6.5-3 8-4.6"/></svg>',
+  link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></svg>'};
+function icon(name, cls) {
+  const t = document.createElement("template");
+  t.innerHTML = ICONS[name] || ICONS.info;                  // 只有上面这几张写死的图 —— 没有一处把链接里的东西当 HTML
+  const s = t.content.firstElementChild;
+  if (cls) s.setAttribute("class", cls);
+  return s;
+}
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const k in attrs || {}) {
+    const v = attrs[k];
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k === "value") el.value = v;
+    else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? "" : String(v));
+  }
+  for (const c of kids.flat(Infinity)) if (c !== null && c !== undefined && c !== false && c !== "") el.append(c instanceof Node ? c : String(c));
+  return el;
+}
+const smooth = () => (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches) ? "auto" : "smooth";
+function reveal(el, block) { try { el.scrollIntoView({behavior: smooth(), block: block || "nearest"}); } catch (e) {} }
+let resultHost = null;                                    // 签字那一屏：签完的结果放在签字按钮下面；别的屏放在页尾
+const host = () => resultHost && resultHost.isConnected ? resultHost : app;
+function notice(kind, title, body, where) {
+  const n = h("div", {class: "notice " + kind, role: kind === "bad" ? "alert" : "status"},
+    kind === "busy" ? h("span", {class: "spin"}) : icon({ok: "check", bad: "x", warn: "warn"}[kind] || "info"),
+    h("div", {class: "nb"}, title ? h("b", {text: title}) : null, body instanceof Node ? body : body ? h("p", {text: body}) : null));
+  if (kind === "busy") n.className = "notice info";
+  (where || host()).append(n);
+  return n;
+}
+function busy(text, where) { return notice("busy", null, text, where); }
+function copyLinkButton() {                               // 2.12.0：用不了 passkey 的浏览器（例如某个 app 里面的浏览器）—— 把这一页的链接复制到 Safari / Chrome 打开
+  const b = h("button", {class: "btn ghost small", type: "button"}, icon("link"), h("span", {text: "复制这一页的链接"}));
+  b.onclick = async () => {
+    try { await navigator.clipboard.writeText(location.href); b.lastChild.textContent = "已复制：到 Safari / Chrome / Edge 粘贴打开"; }
+    catch (e) { window.prompt("复制这个链接，到 Safari / Chrome / Edge 打开：", location.href); }
+  };
+  return b;
+}
+function waError(e) {                                       // 2.12.0：WebAuthn 的错说人话（原来直接印浏览器的英文）
+  const msg = e && typeof e === "object" && !e.vane && {
+    NotAllowedError: "没签成：取消了，或者等太久超时了 —— 再按一次就行。要是系统根本没弹出验证窗：这个浏览器（例如某个 app 里面的浏览器）可能用不了 passkey，复制链接到 Safari / Chrome 打开。",
+    SecurityError: "这个网址不能用 passkey：要从 http://localhost（本机）或 https://mxx-yyl.github.io/signPage/（云端）打开。",
+    InvalidStateError: "这台设备上已经有这一把 passkey 了。",
+    NotSupportedError: "这个浏览器或设备不支持这种 passkey —— 换 Safari / Chrome / Edge 的新版本试试。",
+    AbortError: "被打断了 —— 再按一次。",
+    UnknownError: "设备那边出错了 —— 再按一次；还不行就换个浏览器。"}[e.name];
+  if (!msg) return e;
+  const x = new Error(msg);
+  x.vane = true;
+  x.inapp = ["NotAllowedError", "NotSupportedError", "UnknownError"].includes(e.name);
+  return x;
+}
+function fail(e, where) {
+  const err = waError(e);
+  const n = notice("bad", "没成", h("div", {}, h("p", {text: (err && err.message) || String(err)}), err && err.inapp ? h("div", {class: "btnrow"}, copyLinkButton()) : null), where);
+  reveal(n, "center");
+  return n;
+}
+function out(title, obj, note) {                            // 一段要贴回会话的 JSON：大按钮复制；2.12.0 起先自己试着复制一次（浏览器不让就等人按）
   const text = JSON.stringify(obj);
-  const c = card(`<p class="okc"><b>${esc(title)}</b></p><p class="muted">${esc(note)}</p>
-     <textarea readonly>${esc(text)}</textarea><button>复制，贴回会话</button>`);
-  const btn = c.querySelector("button"), ta = c.querySelector("textarea");
-  btn.onclick = async () => { try { await navigator.clipboard.writeText(text); btn.textContent = "已复制"; } catch (e) { ta.focus(); ta.select(); } };
-  c.scrollIntoView({behavior: "smooth", block: "start"});
+  const label = h("span", {text: "复制，贴回会话"});
+  const btn = h("button", {class: "btn primary big", type: "button"}, icon("copy"), label);
+  const state = h("p", {class: "copystate", role: "status"});
+  const ta = h("textarea", {class: "json", readonly: true, spellcheck: "false", "aria-label": "要贴回会话的那段 JSON"});
+  ta.value = text;
+  const raw = h("details", {class: "raw"}, h("summary", {}, icon("chev"), "看这段 JSON（" + text.length + " 个字符）"), ta);
+  const panel = h("section", {class: "result"},
+    h("div", {class: "result-head"}, h("span", {class: "badge-ic"}, icon("check")), h("div", {}, h("h2", {text: title}), note ? h("p", {text: note}) : null)),
+    btn, state, raw);
+  async function copy(auto) {
+    try {
+      await navigator.clipboard.writeText(text);
+      label.textContent = "已复制 —— 回到会话粘贴";
+      state.textContent = auto ? "已经替你复制好了：回到会话直接粘贴（贴不上就再按一次上面的按钮）。" : "已复制。";
+    } catch (e) {
+      if (!auto) { raw.open = true; ta.focus(); ta.select(); state.textContent = "浏览器不让复制：已经替你选中了，按 ⌘C / Ctrl+C。"; }
+    }
+  }
+  btn.onclick = () => copy(false);
+  host().append(panel);
+  reveal(panel, "start");
+  copy(true);
+  return panel;
+}
+function hero(eyebrow, title, lede, extra) {
+  return h("section", {class: "hero"}, h("div", {class: "eyebrow", text: eyebrow}), h("h1", {}, title), lede ? h("p", {class: "lede", text: lede}) : null, extra || null);
+}
+function chrome(state, me) {                               // 顶上的两块牌子（在哪儿、谁登记了）+ 页脚
+  const cloud = CLOUD_HOSTS.includes(location.hostname);
+  const env = cloud
+    ? h("span", {class: "chip ok", title: "GitHub Pages 上的 signPage：没有本机小服务，签完把那段 JSON 贴回云会话"}, icon("cloud"), "云端 · signPage")
+    : h("span", {class: "chip " + (state ? "ok" : "warn"), title: state ? "本机小服务在线" : "本机小服务没回话：签完要把那段 JSON 贴回会话，页面也不能自己更新"},
+        h("span", {class: "dot"}), "本机 · " + location.host);
+  const who = me ? h("span", {class: "chip ok", title: "钥 " + String(me.fingerprint || "").slice(0, 16) + "…"}, icon("user"), "已登记 · " + me.principal)
+    : h("span", {class: "chip"}, icon("user"), "这台设备还没登记");
+  document.getElementById("chips").replaceChildren(env, who);
+  document.getElementById("foot").textContent = cloud
+    ? "签字页 " + PAGE_VERSION + " · 云端签字页（GitHub Pages）· 没有本机小服务：签完把那段 JSON 贴回云会话"
+    : "签字页 " + PAGE_VERSION + (state ? " · 页面 " + String(state.page || "").slice(0, 12) + "… · " + (state.box ? "箱 " + state.box : "装的时候那一版") +
+      " · 认的根签字人 " + (((state.roots || {}).signers || []).length) + " 位 · " + state.loader : " · 本机小服务没回话（不能自己更新）");
 }
 
 // ---------------------------------------------------------------- 本机小服务（装一次的那一个）：它记着这台电脑登记的钥、认的根签字人、此刻的页面
 async function loadState() {
+  if (CLOUD_HOSTS.includes(location.hostname)) return null;   // 2.12.0：云端（GitHub Pages）没有本机小服务，不去问
   try { const r = await fetch("/vane/state", {cache: "no-store"}); return r.ok ? await r.json() : null; } catch (e) { return null; }
 }
 async function post(state, path, body) {
@@ -264,15 +606,18 @@ async function approveLocally(state, rel, me, m) {
 async function createPasskey(who) {                         // 这台设备新设一把 passkey -> 签字页「登记」那段 JSON（2.10.0 起 setup 也用它）
   if (!who) throw new Error("先写你的名字（GitHub 用户名或你在团队里的名字）");
   const nonce = hex(crypto.getRandomValues(new Uint8Array(16)));
-  const cred = await navigator.credentials.create({publicKey: {
-    rp: {name: "vane", id: location.hostname},
-    user: {id: crypto.getRandomValues(new Uint8Array(16)), name: who, displayName: who + " (vane)"},
-    challenge: await sha256(enc.encode(PREFIX + "\nvane-signer-self\n" + who + "\n" + nonce)),
-    pubKeyCredParams: [{type: "public-key", alg: -7}, {type: "public-key", alg: -8}, {type: "public-key", alg: -257}],
-    authenticatorSelection: {residentKey: "preferred", userVerification: "required"},
-    attestation: "direct",                                 // 设备的硬件证明（Windows Hello 的 TPM、YubiKey、Apple）：接到厂商根就当场是签字人，不用谁批准
-    excludeCredentials: [],                                // 2.5.0：同一台电脑可以登记好几个人 —— 不再排除最先登记的那一把
-    hints: HINTS, timeout: 120000}});
+  let cred;
+  try {
+    cred = await navigator.credentials.create({publicKey: {
+      rp: {name: "vane", id: location.hostname},
+      user: {id: crypto.getRandomValues(new Uint8Array(16)), name: who, displayName: who + " (vane)"},
+      challenge: await sha256(enc.encode(PREFIX + "\nvane-signer-self\n" + who + "\n" + nonce)),
+      pubKeyCredParams: [{type: "public-key", alg: -7}, {type: "public-key", alg: -8}, {type: "public-key", alg: -257}],
+      authenticatorSelection: {residentKey: "preferred", userVerification: "required"},
+      attestation: "direct",                               // 设备的硬件证明（Windows Hello 的 TPM、YubiKey、Apple）：接到厂商根就当场是签字人，不用谁批准
+      excludeCredentials: [],                              // 2.5.0：同一台电脑可以登记好几个人 —— 不再排除最先登记的那一把
+      hints: HINTS, timeout: 120000}});
+  } catch (e) { throw waError(e); }
   const spki = cred.response.getPublicKey();
   if (!spki) throw new Error("这个浏览器给不出公钥（要 Chrome / Edge 85、Safari 16 以上）");
   return {schema: "vane.passkey.signer.v1", principal: who, rpId: location.hostname, origin: location.origin, page: location.origin + "/",
@@ -283,24 +628,29 @@ async function createPasskey(who) {                         // 这台设备新�
 async function enroll(state, who, me) {
   const reg = await createPasskey(who);
   await rememberMe(state, reg);
-  app.innerHTML = "";
+  chrome(state, reg);
+  resultHost = null;
+  app.replaceChildren(hero("登记", "登记好了：" + reg.principal, null));
   showEnrolled(reg, true);
 }
-async function enrollPassword(who, pw, again) {
+async function enrollPassword(who, pw, again, where) {
   if (!who) throw new Error("先写你的名字（GitHub 用户名或你在团队里的名字）");
   if (pw.length < 12) throw new Error("密码至少 12 个字符（几个不相干的词最好）：登记记录里有公钥与盐，拿得到仓库的人可以离线猜");
   if (pw !== again) throw new Error("两次输入的密码不一样");
-  const note = card(`<p class="muted">正在用密码算钥（scrypt，几秒钟）……</p>`);
+  const note = busy("正在用密码算钥（scrypt，几秒钟）……", where);
   await tick();
-  const kdf = Object.assign({}, PW_KDF, {salt: b64u(crypto.getRandomValues(new Uint8Array(16)))});
-  const k = await pwKey(pw, kdf);
+  let k, kdf;
+  try {
+    kdf = Object.assign({}, PW_KDF, {salt: b64u(crypto.getRandomValues(new Uint8Array(16)))});
+    k = await pwKey(pw, kdf);
+  } finally { note.remove(); }
   const reg = {schema: "vane.passkey.signer.v1", kind: "password", principal: who, rpId: "password", origin: location.origin, page: location.origin + "/",
     credId: "pw-" + k.fp.slice(0, 32), alg: -8, spki: b64(k.spki), fingerprint: k.fp, kdf};
   rememberPw(reg);
-  note.remove();
-  app.innerHTML = "";
-  out("密码钥算好了：把下面这段贴回会话（只这一次）", reg, "这里只有公钥和盐，没有密码。会话 `vane sign enroll` 收下以后会给你一个链接：用你自己的 passkey 签一下，确认这把密码钥是你的（D-187：软件钥要一位签字人担保）。" +
-    "之后签字页上「输密码签」就和 passkey 一样算数；密码只在这一页里用，不发给任何地方。钥指纹 " + k.fp.slice(0, 16) + "…");
+  resultHost = null;
+  app.replaceChildren(hero("设密码", "密码钥算好了：" + who, null));
+  out("把下面这段贴回会话（只这一次）", reg, "这里只有公钥和盐，没有密码。会话 `vane sign enroll` 收下以后会给你一个链接：用你自己的 passkey 签一下，确认这把密码钥是你的（D-187：软件钥要一位签字人担保）。" +
+    "密码只在这一页里用，不发给任何地方。钥指纹 " + k.fp.slice(0, 16) + "…");
 }
 function showEnrolled(reg, fresh) {
   out(fresh ? "登记好了：把下面这段贴回会话（只这一次）" : "这台电脑登记的钥（" + reg.principal + "）",
@@ -322,57 +672,125 @@ function withItems(res, items) {
   else res.items = items.map(i => ({ns: i.ns, sha: i.sha, file: i.file}));
   return res;
 }
-async function sign(items, me, ret) {
-  const a = await navigator.credentials.get({publicKey: {challenge: await sha256(enc.encode(chalTextOf(items))), rpId: location.hostname, userVerification: "required",
-    timeout: 120000, hints: HINTS, allowCredentials: []}});   // 2.5.0：这台电脑上谁的 passkey 都行（会话按钥认是不是签字人）
+async function sign(items, me, ret, signed) {
+  let a;
+  try {
+    a = await navigator.credentials.get({publicKey: {challenge: await sha256(enc.encode(chalTextOf(items))), rpId: location.hostname, userVerification: "required",
+      timeout: 120000, hints: HINTS, allowCredentials: []}});   // 2.5.0：这台电脑上谁的 passkey 都行（会话按钥认是不是签字人）
+  } catch (e) { throw waError(e); }
   const res = {schema: "vane.passkey.assertion.v1", credId: b64u(a.rawId), authenticatorData: b64u(a.response.authenticatorData),
     clientDataJSON: b64u(a.response.clientDataJSON), signature: b64u(a.response.signature)};
   if (me && me.principal && b64u(a.rawId) === me.credId) res.by = me.principal;   // 用的是别人的钥就不写名字（会话按钥认）
+  if (signed) signed();
   return deliver(withItems(res, items), items, ret);
 }
-async function signWithPassword(items, pw, cands, ret) {   // 2.6.0：试每一把登记过的密码钥（同一套 kdf 只算一次），对得上指纹的那一把来签
-  const note = card(`<p class="muted">正在用密码算钥（scrypt，几秒钟）……</p>`);
+async function signWithPassword(items, pw, cands, ret, signed) {   // 2.6.0：试每一把登记过的密码钥（同一套 kdf 只算一次），对得上指纹的那一把来签
+  const note = busy("正在用密码算钥（scrypt，几秒钟）……");
   await tick();
-  const cache = {};
-  for (const c of cands) {
-    const key = JSON.stringify(c.kdf);
-    const k = cache[key] || (cache[key] = await pwKey(pw, c.kdf));
-    if (k.fp !== c.fingerprint) continue;
-    const msg = concat(enc.encode(PW_PREFIX + "\n"), await sha256(enc.encode(chalTextOf(items))));
-    const sig = await crypto.subtle.sign({name: "Ed25519"}, k.priv, msg);
-    note.remove();
-    return deliver(withItems({schema: "vane.passkey.assertion.v1", kind: "password", credId: c.credId, signature: b64u(sig), by: c.principal}, items), items, ret);
-  }
-  note.remove();
-  throw new Error("密码不对（或这个密码还没登记成签字人）");
+  let hit = null;
+  try {
+    const cache = {};
+    for (const c of cands) {
+      const key = JSON.stringify(c.kdf);
+      const k = cache[key] || (cache[key] = await pwKey(pw, c.kdf));
+      if (k.fp !== c.fingerprint) continue;
+      const msg = concat(enc.encode(PW_PREFIX + "\n"), await sha256(enc.encode(chalTextOf(items))));
+      const sig = await crypto.subtle.sign({name: "Ed25519"}, k.priv, msg);
+      hit = withItems({schema: "vane.passkey.assertion.v1", kind: "password", credId: c.credId, signature: b64u(sig), by: c.principal}, items);
+      break;
+    }
+  } finally { note.remove(); }
+  if (!hit) throw new Error("密码不对（或这个密码还没登记成签字人）");
+  if (signed) signed();
+  return deliver(hit, items, ret);
 }
 async function deliver(res, items, ret) {
   const one = items.length === 1;
+  const where = host();
   if (STATE && STATE.relay && STATE.token) {
     // 2.2.0（docs/design/passkey-return.zh.md §七）：交给本机小服务，它经 ssh 送回 VM（VM 上验过才落）—— 页面只连 'self'，什么都不用复制
-    card(`<p class="okc"><b>签好了，正在送回 VM ……</b></p>`);
-    const r = await post(STATE, "/vane/signed", {assertion: res});
-    const rows = (r.results || []).map(x => `<li class="${x.ok ? "okc" : "err"}">${x.ok ? "✓" : "✗"} ${esc(String(x.file || "").split("/").pop())} —— ${esc(x.note || "")}</li>`).join("");
-    const n = (r.results || []).filter(x => x.ok).length;
-    card(`<p class="${n && n === (r.results || []).length ? "okc" : "err"}"><b>${n ? "签名回到 VM 了：落了 " + n + " 件" : "没有落下"}</b></p><ul>${rows}</ul>
-      <p class="muted">${esc(r.note || "")}</p>`).scrollIntoView({behavior: "smooth", block: "start"});
+    const sending = busy("签好了，正在送回 VM ……", where);
+    let r;
+    try { r = await post(STATE, "/vane/signed", {assertion: res}); } finally { sending.remove(); }
+    const results = r.results || [];
+    const n = results.filter(x => x.ok).length;
+    const list = h("ul", {class: "outcomes"}, results.map(x => h("li", {class: x.ok ? "ok" : "bad"}, icon(x.ok ? "check" : "x"),
+      h("span", {}, h("span", {class: "mono", text: String(x.file || "").split("/").pop()}), h("span", {class: "muted", text: " —— " + (x.note || "")})))));
+    reveal(notice(n && n === results.length ? "ok" : "bad", n ? "签名回到 VM 了：落了 " + n + " 件" : "没有落下",
+      h("div", {}, list, r.note ? h("p", {class: "muted", text: r.note}) : null), where), "start");
     // 2.9.0：一件都没落（VM 上没有这份文件 —— 例如云会话发起的请求）：签名照样交给人，贴回发起的那个会话
     if (!n) out("VM 没落下：把下面这段贴回发起签字的那个会话", res, (one ? "这段只批准上面那一份文件的这几个字节" : "这段批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "；改一个字节就作废");
     return;
   }
   const back = returnUrl(ret);
   if (back) {
-    card(`<p class="okc"><b>签好了，正在送回 VM：${esc(back.origin)}</b></p><p class="muted">收件页会说落了几件。连不上就点浏览器的「后退」回到这一页再签一次（链接还在）。</p>`);
+    notice("ok", "签好了，正在送回 VM：" + back.origin, "收件页会说落了几件。连不上就点浏览器的「后退」回到这一页再签一次（链接还在）。", where);
     back.search = "?a=" + b64u(enc.encode(JSON.stringify(res)));
     location.assign(back.href);
     return;
   }
   out("签好了：把下面这段贴回会话", res, (one ? "这段只批准上面那一份文件的这几个字节" : "这段批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "；改一个字节就作废。会话 `vane sign accept` 逐件验过才落。");
 }
-function enrollSummary(text) {
-  try { const d = JSON.parse(text), s = d.signer || {}; return `<p>名字 <b>${esc(s.principal)}</b> · 钥 <span class="mono">${esc(String(s.fingerprint || "").slice(0, 16))}…</span> · 设备证明 <span class="mono">${esc((d.attestation || {}).fmt || "没有")}</span></p>
-    <p class="muted">只在你确认这是一个真的人（你认识、知道他在登记）时才签。签了 = 你为他负责；AI 自己造的钥就是靠这一步挡住的。</p>`; } catch (e) { return ""; }
+
+// ---------------------------------------------------------------- 主动替你勾好 / 选好（2.12.0，用户 2026-11-06「主動智能勾選建議項目」）
+// 批准件（没有 choice 的）每件一个勾，默认勾上 —— 会话就是来要这几件的；去掉的这次不签，照旧在等签队列里。
+// 单选组（同一个 choice 的几份候选，签的那一批只含选中的那一份）每一组都预先选好一项，按这个次序找建议，并把理由写在旁边：
+//   ① 会话标了 def 的，理由用会话给的 why（没给就写「vane 的默认」）：UVA「最后一次」、交付方式「合并 trace」；指控方（passkey 2.7.0 起，memo D-311）
+//      这条线自己、或它去掉「-后缀」的那条线在问之前已经被指控方审过 ->「不要」（「上一次已经审过（线，日期）」），否则「要」（不放宽）；
+//   ② 下面这张表（老会话出的链接没带指控方的 def 时用）：不放宽、照原来的做法（指控方「要」= 门 L120 照判；律师侧「单人」= 没定时的老做法）。
+// 不记「你上次选的」：上一次怎么选不等于这一条线该怎么选（用户 2026-11-06「如果上一次做過了默認就不選」—— 看的是审没审过，不是点过什么）。
+// 都没有的那一组不替你选（按钮不亮，直到你选）。建议只是预选 —— 签的永远是你按下去那一刻页上选中的字节，没签照旧是没定。
+const KIND_TITLE = {prosecutor: "指控方", uva: "UVA 签字环节", counsel: "律师侧", releasemode: "交付方式"};
+const RECOMMEND = {                                         // 理由只写一句；选中那一项的说明在选项下面
+  "PROSECUTOR.on.toml": "不放宽（门 L120 照判）",
+  "COUNSEL.single.toml": "照原来的做法",
+  "UVA.end.toml": "vane 的默认",
+  "RELEASEMODE.merged.toml": "vane 的默认"};
+const baseName = f => String(f || "").split("/").pop();
+const kindOf = choice => { const i = choice.indexOf(":"); return i > 0 ? choice.slice(0, i) : choice; };
+const linePathOf = choice => { const i = choice.indexOf(":"); return i > 0 ? choice.slice(i + 1) : ""; };
+function lineInfo(path) {
+  const m = /(?:^|\/)cases\/([^/]+)\/projects\/([^/]+)\/([^/]+)\/lines\/([^/]+)\/?$/.exec(path);
+  return m ? {name: m[4], ctx: m[1] + " · " + m[2] + " · " + m[3]} : {name: path.split("/").filter(Boolean).pop() || "（没写是哪条线）", ctx: path};
 }
+function suggest(g) {
+  const d = g.opts.find(o => o.def);
+  if (d) return {opt: d, why: d.why || "vane 的默认"};
+  const r = g.opts.find(o => RECOMMEND[baseName(o.file)]);
+  return r ? {opt: r, why: RECOMMEND[baseName(r.file)]} : null;
+}
+function optShort(o, kind) {                                // 候选的说明「短名：解释」-> 短名（去掉「（默认）」，同一问的标题词不重复说）
+  let s = o.label || baseName(o.file);
+  const i = s.search(/[：:]/);
+  if (i > 0) s = s.slice(0, i);
+  s = s.replace(/（默认）/g, "").trim();
+  const t = KIND_TITLE[kind];
+  if (t && s.includes(t)) { const s2 = s.replace(t, " ").replace(/\s+/g, " ").replace(/^\s*·\s*|\s*·\s*$/g, "").trim(); if (s2) s = s2; }
+  return s;
+}
+function optDesc(o) { const s = o.label || "", i = s.search(/[：:]/); return i > 0 ? s.slice(i + 1).replace(/（默认）\s*$/, "").trim() : ""; }
+function tagOf(it) { return it.ns === "vane-line-allow" && /forms\.segments\.txt$/.test(it.file) ? "需求切分" : (NS_SHORT[it.ns] || it.ns); }
+function itemFlags(it) {                                    // 一眼要看到的：许可放不放宽、动没动 fail-to-go 的门、担保要你负责……（只是提示，不改勾）
+  const f = [];
+  if (it.ns === "vane-gates-permit") {
+    const n = parseInt(fields(it.text || "").relaxations, 10);
+    if (n > 0) f.push(["warn", "放宽 " + n + " 处 · 先读原文"]);
+    else if (n === 0) f.push(["ok", "不放宽"]);
+    if (/^- .*★/m.test(it.text || "")) f.push(["warn", "动了 fail-to-go 的门"]);
+  } else if (it.ns === ENROLL_NS) f.push(["warn", "签了 = 你为这个人负责"]);
+  else if (it.ns === PAGE_NS) f.push(["info", "只有根签字人签的才算"]);
+  else if (it.ns === "vane-release") f.push(["info", "签了 S11 才推给客户"]);
+  return f;
+}
+function enrollSummary(text) {
+  try {
+    const d = JSON.parse(text), s = d.signer || {};
+    return h("div", {class: "enroll"}, h("div", {}, "名字 ", h("b", {text: String(s.principal)}), " · 钥 ", h("span", {class: "mono", text: String(s.fingerprint || "").slice(0, 16) + "…"}),
+      " · 设备证明 ", h("span", {class: "mono", text: (d.attestation || {}).fmt || "没有"})),
+      h("p", {text: "只在你确认这是一个真的人（你认识、知道他在登记）时才签。签了 = 你为他负责；AI 自己造的钥就是靠这一步挡住的。"}));
+  } catch (e) { return null; }
+}
+
 async function showItems(items, me, ret, pwSigners) {
   const ready = [];
   for (const it of items) {
@@ -381,68 +799,187 @@ async function showItems(items, me, ret, pwSigners) {
     const sha = hex(await sha256(bytes));
     if (it.sha && it.sha !== sha) return fail("链接里说的 sha 与带来的内容算出来的不一样（" + it.file + "）—— 不签");
     ready.push({ns: it.ns, sha, file: it.file || "", text: it.t !== undefined ? it.t : null, size: bytes.length,
-                choice: typeof it.choice === "string" ? it.choice : "", label: String(it.label || ""), ask: String(it.ask || ""), def: it.def === true});
+                choice: typeof it.choice === "string" ? it.choice : "", label: String(it.label || ""), ask: String(it.ask || ""), def: it.def === true,
+                why: typeof it.why === "string" ? it.why.slice(0, 120) : ""});
   }
-  // 2.3.0（docs/design/prosecutor-optional.zh.md）：同一组（choice）的几件是二选一 —— 画成单选，签的那一批只含选中的那一件
-  const groups = [...new Set(ready.filter(it => it.choice).map(it => it.choice))];
+  // 2.3.0（docs/design/prosecutor-optional.zh.md）：同一组（choice）的几件是单选 —— 签的那一批只含选中的那一件
   const plain = ready.filter(it => !it.choice);
-  const n = plain.length + groups.length;
-  card(`<p><b>要你签的：${n} 件</b>${groups.length ? `（其中 ${groups.length} 件是单选）` : ""}</p><p class="muted">每一件都是原样（签的就是这些字节）。读完再签；不签就关掉这一页，什么都不会发生。</p>`);
-  let k = 0;
-  // 2.4.0：每一件最上面一句「主诉求」（用户 2026-10-21「下次passkey 要写主诉求  不要一堆没用的文字」）—— 只是标签、不签；签的原文折在下面
-  plain.forEach(it => card(`<p style="font-size:18px"><span class="tag">${++k}</span><b>${esc(it.ask || NS_LABEL[it.ns])}</b></p>
-    ${it.ns === "vane-signer-enroll" && it.text ? enrollSummary(it.text) : ""}
-    <details><summary class="muted">原文（签的就是这些字节）· ${esc(it.file || "（没写名字）")} · sha256 ${esc(it.sha.slice(0, 16))}…</summary>
-    ${it.text !== null ? `<pre class="doc mono">${esc(it.text)}</pre>` : `<p class="muted">（二进制，${it.size} 字节）</p>`}</details>`));
-  const picked = {};
-  groups.forEach((g, gi) => {
-    const opts = ready.filter(it => it.choice === g);
-    const c = card(`<p style="font-size:18px"><span class="tag">${++k}</span><b>${esc(opts[0].ask || ("二选一：" + g))}</b></p>` +
-      opts.map((it, oi) => `<label style="display:block;margin:10px 0"><input type="radio" name="g${gi}" value="${oi}"${it.def ? " checked" : ""} style="width:auto;margin-right:8px">
-        <b>${esc(it.label || it.file)}</b></label><details><summary class="muted">原文（${esc(it.file)} · sha256 ${esc(it.sha.slice(0, 16))}…）</summary>
-        <pre class="doc mono">${esc(it.text || "")}</pre></details>`).join(""));
-    c.querySelectorAll("input[type=radio]").forEach(r => r.onchange = () => { picked[g] = opts[Number(r.value)]; update(); });
-    const d = opts.findIndex(it => it.def);                // 2.9.0：会话标了默认的那一项预先选好（仍可改选）
-    if (d >= 0) picked[g] = opts[d];
-  });
-  const c = card(`<button></button><p class="muted">用你自己的 passkey 签：这台电脑上登记过的谁都可以（${me ? "最近登记的是 " + esc(me.principal) + "；" : ""}会话那边按钥认签字人）</p>`);
-  const btn = c.querySelector("button");
-  // 2.6.0：或者输密码签（链接带来的被信任的密码钥 + 这台电脑上登记过的；只有公钥与盐）。
-  // 2.11.0（用户 2026-11-05「密碼只放權，簽字永遠用passkey … 除了放權它一般不簽名」）：只在这一批全是担保（vane-signer-enroll）时出现 ——
-  // 密码只用来放权；别的一律按 passkey 签。
+  const byKey = new Map();
+  for (const it of ready.filter(x => x.choice)) {
+    if (!byKey.has(it.choice)) byKey.set(it.choice, {key: it.choice, kind: kindOf(it.choice), path: linePathOf(it.choice), opts: []});
+    byKey.get(it.choice).opts.push(it);
+  }
+  const groups = [...byKey.values()];
+  groups.forEach((g, i) => Object.assign(g, {idx: i, title: KIND_TITLE[g.kind] || g.opts[0].ask || ("单选：" + g.key), sugg: suggest(g), pick: null}));
+  const lines = [];
+  for (const g of groups) { let L = lines.find(x => x.path === g.path); if (!L) lines.push(L = {path: g.path, info: lineInfo(g.path), groups: []}); L.groups.push(g); }
+  const n = plain.length + groups.length, preset = plain.length + groups.filter(g => g.sugg).length, need0 = n - preset;
   const delegating = ready.length > 0 && ready.every(it => it.ns === ENROLL_NS);
+  let phase = "idle", signedCount = 0;
+  document.title = "要你签 " + n + " 件 · vane 签字";
+
+  app.replaceChildren(hero("签字请求", ["要你签的：", h("span", {class: "n", text: String(n)}), " 件"],
+    "已经替你" + [plain.length ? "勾好" : "", groups.length ? "选好" : ""].filter(Boolean).join("、") + "建议的那几项 —— 看一眼，按一次指纹 / PIN 就一起签完" +
+    (need0 ? "（还有 " + need0 + " 个决定要你自己选）" : "") + "。签的就是下面摆出来的字节；不签就关掉这一页，什么都不会发生。",
+    h("div", {class: "stats"},
+      plain.length ? h("span", {class: "stat"}, icon("doc"), h("b", {text: String(plain.length)}), "件批准") : null,
+      groups.length ? h("span", {class: "stat"}, icon("fork"), h("b", {text: String(groups.length)}), "个决定 · " + lines.length + " 条线") : null,
+      preset ? h("span", {class: "stat sugg"}, icon("spark"), "已按建议预选", h("b", {text: String(preset)}), "项") : null,
+      need0 ? h("span", {class: "stat need"}, icon("warn"), h("b", {text: String(need0)}), "个要你选") : null)));
+
+  // ---- 批准件：每件一个勾
+  let allToggle = null;
+  if (plain.length) {
+    allToggle = plain.length > 1 ? h("button", {class: "linkbtn", type: "button"}, "全不勾") : null;
+    const list = h("ul", {class: "items"}, plain.map((it, i) => {
+      const id = "it" + i;
+      it.on = true;
+      it.cb = h("input", {type: "checkbox", class: "cb", id, checked: true, "aria-label": "签这一件"});
+      it.li = h("li", {class: "item on"}, h("div", {}, it.cb),
+        h("div", {class: "item-body"},
+          h("div", {class: "item-top"}, h("span", {class: "num", text: String(i + 1)}), h("span", {class: "tag", title: NS_LABEL[it.ns], text: tagOf(it)}),
+            itemFlags(it).map(([k, t]) => h("span", {class: "badge " + k, text: t}))),
+          h("label", {class: "ask", for: id, text: it.ask || NS_LABEL[it.ns]}),
+          it.ns === ENROLL_NS && it.text ? enrollSummary(it.text) : null,
+          h("div", {class: "meta mono", text: (it.file || "（没写名字）") + " · sha256 " + it.sha.slice(0, 16) + "… · " + it.size + " 字节"}),
+          h("details", {class: "raw"}, h("summary", {}, icon("chev"), "原文（签的就是这些字节）· " + NS_LABEL[it.ns]),
+            it.text !== null ? h("pre", {class: "doc", text: it.text}) : h("p", {class: "muted", text: "（二进制，" + it.size + " 字节）"}))));
+      it.cb.addEventListener("change", () => setOn(it, it.cb.checked));
+      return it.li;
+    }));
+    app.append(h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", {text: "批准 · " + plain.length + " 件"}), allToggle),
+      h("p", {class: "block-hint", text: "每件都替你勾上了；去掉勾的这次不签，照旧在等签队列里，下次再签。"}), list));
+    if (allToggle) allToggle.onclick = () => { const to = !plain.every(it => it.on); plain.forEach(it => setOn(it, to)); };
+  }
+  function setOn(it, on) { it.on = on; it.cb.checked = on; it.li.classList.toggle("on", on); it.li.classList.toggle("off", !on); update(); }
+
+  // ---- 单选：按线归拢，每一问预先选好建议的那一项
+  let resetAll = null;
+  if (groups.length) {
+    resetAll = groups.some(g => g.sugg) ? h("button", {class: "linkbtn", type: "button", onclick: () => groups.forEach(g => g.sugg && choose(g, g.sugg.opt, "reset"))}, "全部恢复建议") : null;
+    app.append(h("section", {class: "block"}, h("div", {class: "block-head"}, h("h2", {text: "每条线的决定 · " + lines.length + " 条线"}), resetAll),
+      h("p", {class: "block-hint", text: "每一问都替你选好了建议的那一项（✦ 后面写着为什么），点别的就改；签的只是每一问选中的那一份。"}),
+      h("div", {class: "lines"}, lines.map(L => h("article", {class: "line"},
+        h("header", {class: "line-head"}, h("span", {class: "line-name", text: L.info.name}), h("span", {class: "line-ctx", text: L.info.ctx})),
+        L.groups.map(question))))));
+  }
+  function question(g) {
+    g.badge = h("span", {class: "sugg"});
+    const opts = h("div", {class: "opts", role: "radiogroup", "aria-label": g.title});
+    g.opts.forEach((o, oi) => {
+      o.input = h("input", {type: "radio", name: "g" + g.idx, value: String(oi)});
+      o.el = h("label", {class: "opt", title: o.label || o.file}, o.input, icon("check", "tick"), h("span", {text: optShort(o, g.kind)}),
+        g.sugg && g.sugg.opt === o ? icon("spark", "sp") : null);
+      o.input.addEventListener("change", () => { if (o.input.checked) choose(g, o, "user"); });
+      o.input.addEventListener("focus", () => { let fv = true; try { fv = o.input.matches(":focus-visible"); } catch (e) {} if (fv) o.el.classList.add("focus"); });
+      o.input.addEventListener("blur", () => o.el.classList.remove("focus"));
+      opts.append(o.el);
+    });
+    g.desc = h("p", {class: "q-desc"});
+    g.prop = h("div", {class: "prop", hidden: true});
+    return h("div", {class: "q"}, h("div", {class: "q-head"}, h("span", {class: "q-title", title: g.opts[0].ask, text: g.title}), g.badge), opts, g.desc, g.prop,
+      h("details", {class: "raw"}, h("summary", {}, icon("chev"), "原文（" + g.opts.length + " 份候选，只签选中的那一份）"),
+        g.opts.map(o => h("div", {class: "rawopt"}, h("div", {class: "meta mono", text: o.file + " · sha256 " + o.sha.slice(0, 16) + "…"}), h("pre", {class: "doc", text: o.text || ""})))));
+  }
+  function choose(g, o, why) {
+    g.pick = o;
+    for (const x of g.opts) { x.el.classList.toggle("sel", x === o); x.input.checked = x === o; }
+    g.desc.textContent = optDesc(o);
+    badge(g);
+    if (why === "user") offer(g); else g.prop.hidden = true;
+    update();
+  }
+  function badge(g) {
+    g.badge.replaceChildren();
+    if (!g.pick) { g.badge.className = "sugg need"; g.badge.append(icon("warn"), h("span", {text: "这一问要你选"})); return; }
+    if (g.sugg && g.pick === g.sugg.opt) { g.badge.className = "sugg"; g.badge.append(icon("spark"), h("span", {text: "建议 · " + g.sugg.why})); return; }
+    g.badge.className = "sugg changed";
+    g.badge.append(h("span", {text: g.sugg ? "你改过" : "你选的"}));
+    if (g.sugg) g.badge.append(h("button", {class: "linkbtn", type: "button", onclick: () => choose(g, g.sugg.opt, "reset")}, "恢复建议（" + optShort(g.sugg.opt, g.kind) + "）"));
+  }
+  function offer(g) {                                       // 改了一条线：同一批里同一问还不是这一项的线，一键带上（不自动改别人的）
+    const key = baseName(g.pick.file), short = optShort(g.pick, g.kind);
+    const others = groups.filter(x => x !== g && x.kind === g.kind && x.opts.some(o => baseName(o.file) === key) && !(x.pick && baseName(x.pick.file) === key));
+    g.prop.replaceChildren();
+    g.prop.hidden = !others.length;
+    if (!others.length) return;
+    g.prop.append(icon("info"), h("span", {text: "同一批还有 " + others.length + " 条线的「" + g.title + "」不是「" + short + "」"}),
+      h("button", {class: "btn ghost small", type: "button", onclick: () => { others.forEach(x => choose(x, x.opts.find(o => baseName(o.file) === key), "same")); g.prop.hidden = true; }},
+        "都改成「" + short + "」"),
+      h("button", {class: "linkbtn", type: "button", onclick: () => { g.prop.hidden = true; }}, "不用"));
+  }
+
+  // ---- 放权：这一批全是担保时，也可以输人的密码签（2.11.0：别的一律 passkey）
   let pin = null, pbtn = null, cands = [];
   if (delegating) {
     const seen = new Set();
     cands = (pwSigners || []).concat(rememberedPw()).filter(x => x && x.credId && !seen.has(x.credId) && seen.add(x.credId));
-    const pc = card(`<p><b>或者：输密码签（放权）</b></p><p class="muted">${cands.length ? "这一批全是担保：可以用人的密码签。密码只在这台电脑的浏览器里用来签名，不发给任何地方。" +
-      "（登记过的密码钥：" + cands.map(x => esc(x.principal)).join("、") + "）" : "还没有登记过密码钥。"}</p>
-      <input type="password" autocomplete="current-password" placeholder="vane 的密码"><button class="secondary"></button>`);
-    pin = pc.querySelector("input"); pbtn = pc.querySelector("button");
-    if (!cands.length) { pin.disabled = true; }
-  } else {
-    card(`<p class="muted">签字用 passkey。密码只放权：只在担保 passkey 时出现（设 passkey 用会话给的 setup 链接）。</p>`);
+    pin = h("input", {class: "input", type: "password", autocomplete: "current-password", placeholder: "vane 的密码", disabled: !cands.length});
+    pbtn = h("button", {class: "btn ghost", type: "button"}, icon("lock"), h("span"));
+    app.append(h("section", {class: "block pwblock"}, h("div", {class: "block-head"}, h("h2", {text: "或者：输密码签（放权）"})),
+      h("div", {class: "card"}, h("p", {class: "muted", text: cands.length ? "这一批全是担保：可以用人的密码签。密码只在这台设备的浏览器里用来签名，不发给任何地方。（登记过的密码钥：" +
+        cands.map(x => x.principal).join("、") + "）" : "还没有登记过密码钥。"}), pin, h("div", {class: "btnrow"}, pbtn))));
+    pin.addEventListener("keydown", e => { if (e.key === "Enter" && !pbtn.disabled) go("pw"); });
+  }
+
+  // ---- 底下一直在的签字条
+  const btnText = h("span");
+  const btn = h("button", {class: "btn primary big", type: "button"}, icon("key"), btnText);
+  const sum = h("div", {class: "sumline", role: "status"});
+  const sub = h("p", {class: "sub", text: "Touch ID / Windows Hello / PIN / 安全钥都行" + (me ? " · 最近登记的是 " + me.principal : "")});
+  const bar = h("div", {class: "actionbar"}, sum, btn, sub);
+  resultHost = h("div", {class: "results"});
+  app.append(h("p", {class: "note", text: "用这台设备的 passkey 签：这台设备上登记过的谁都可以，会话那边按钥认签字人；私钥在设备里，这一页拿不到。" +
+    (delegating ? "" : "签字用 passkey；密码只放权：只在担保 passkey 时出现（设 passkey 用会话给的 setup 链接）。")}), bar, resultHost);
+  const selected = () => plain.filter(it => it.on).concat(groups.filter(g => g.pick).map(g => g.pick));
+  function lock(on) {
+    plain.forEach(it => { it.cb.disabled = on; });
+    groups.forEach(g => { g.opts.forEach(o => { o.input.disabled = on; o.el.classList.toggle("locked", on); }); g.badge.querySelectorAll("button").forEach(b => { b.disabled = on; }); if (on) g.prop.hidden = true; });
+    [allToggle, resetAll].forEach(b => { if (b) b.disabled = on; });
+    if (pin) pin.disabled = on || !cands.length;
   }
   function update() {
-    const left = groups.filter(g => !picked[g]).length;
-    btn.disabled = left > 0;
-    btn.textContent = left ? "先在单选里选一项" : (n === 1 ? "用 passkey 签这一件" : "用 passkey 一次签这 " + n + " 件") + "（Windows Hello / Touch ID / PIN）";
+    const sel = selected(), need = groups.filter(g => !g.pick).length, off = plain.filter(it => !it.on).length;
+    if (phase === "signed") {
+      btn.hidden = true; sub.hidden = true;
+      sum.replaceChildren(h("span", {class: "okline"}, icon("check"), "已签 " + signedCount + " 件"), h("span", {class: "muted", text: "结果在下面"}));
+      if (pbtn) pbtn.disabled = true;
+      return;
+    }
+    const np = plain.filter(it => it.on).length, nd = groups.filter(g => g.pick).length;
+    sum.replaceChildren(...[h("span", {}, "将签 ", h("b", {text: String(sel.length)}), " 件" + (np && nd ? "（" + np + " 件批准 + " + nd + " 个决定）" : "")),
+      off ? h("span", {class: "muted", text: off + " 件没勾：这次不签，留着下次"}) : null].filter(Boolean));
+    btn.disabled = phase !== "idle" || need > 0 || !sel.length;
+    btnText.textContent = phase === "signing" ? "等你按指纹 / PIN ……" : need ? "还有 " + need + " 个决定要你选" : !sel.length ? "一件都没勾" :
+      sel.length === 1 ? "用 passkey 签这一件" : "用 passkey 一次签这 " + sel.length + " 件";
     if (pbtn) {
-      pbtn.disabled = left > 0 || !cands.length;
-      pbtn.textContent = left ? "先在单选里选一项" : (n === 1 ? "用密码签这一件" : "用密码一次签这 " + n + " 件");
+      pbtn.disabled = phase !== "idle" || need > 0 || !sel.length || !cands.length;
+      pbtn.lastChild.textContent = need ? "先在单选里选一项" : sel.length === 1 ? "用密码签这一件" : "用密码一次签这 " + sel.length + " 件";
+    }
+    if (allToggle) allToggle.textContent = plain.every(it => it.on) ? "全不勾" : "全勾上";
+  }
+  async function go(how) {
+    const sel = selected();
+    if (!sel.length || phase !== "idle") return;
+    phase = "signing"; lock(true); update();
+    const done = () => { phase = "signed"; signedCount = sel.length; bar.classList.add("done"); update(); };
+    try {
+      if (how === "pw") { await signWithPassword(sel, pin.value, cands, ret, done); pin.value = ""; }
+      else await sign(sel, me, ret, done);
+    } catch (e) {
+      phase = "idle"; lock(false); bar.classList.remove("done"); update(); fail(e, resultHost);
     }
   }
+  btn.onclick = () => go("passkey");
+  if (pbtn) pbtn.onclick = () => go("pw");
+  groups.forEach(g => { if (g.sugg) choose(g, g.sugg.opt, "auto"); else badge(g); });
   update();
-  btn.onclick = () => { btn.disabled = true; sign(plain.concat(groups.map(g => picked[g])), me, ret).catch(e => { btn.disabled = false; fail(e); }); };
-  if (pbtn) pbtn.onclick = () => { pbtn.disabled = true; signWithPassword(plain.concat(groups.map(g => picked[g])), pin.value, cands, ret)
-    .then(() => { pin.value = ""; }).catch(e => { pbtn.disabled = false; fail(e); }); };
 }
 
 // ---------------------------------------------------------------- 一次密码设 passkey（2.10.0，setup 链接；会话 `vane sign setup-link` 出）
 // 链接带 setup = {who: [名字…], rec: {schema, namespaces, note}}（rec 是会话那一版 passkey.py 写登记记录用的那几样）与人的密码钥 pw（只有公钥与盐）。
 // 人输一次密码 -> 对上 pw 里的一把才往下走；每个名字按一次（每次新设 passkey 都要人按一下：Safari 只认点出来的）；全设好（或「到这里就好」）
 // -> 这一页用那把密码钥对每一份登记记录签担保（一批，vane-signer-enroll）-> 一段 JSON 贴回会话 `vane sign setup '<JSON>'`。
-const ENROLL_NS = "vane-signer-enroll";
 function cborFmt(u) {                                       // 设备证明（attestationObject，CBOR 表）里的 fmt —— 只读这一格，别的跳过
   let p = 0;
   const need = n => { if (p + n > u.length) throw new Error("设备证明读不动（CBOR 截断）"); };
@@ -482,9 +1019,9 @@ function recordText(reg, rec) {
   return JSON.stringify(doc, null, 1) + "\n";
 }
 const slugOf = who => [...String(who)].map(ch => /[\p{L}\p{N}_-]/u.test(ch) ? ch : "-").slice(0, 40).join("") || "signer";
-async function pwMatch(pw, cands) {                         // 密码 -> 对得上指纹的那一把人的密码钥 {k（私钥只在这一页里）, c}
+async function pwMatch(pw, cands, where) {                  // 密码 -> 对得上指纹的那一把人的密码钥 {k（私钥只在这一页里）, c}
   if (!pw) throw new Error("先输密码");
-  const note = card(`<p class="muted">正在用密码算钥（scrypt，几秒钟）……</p>`);
+  const note = busy("正在用密码算钥（scrypt，几秒钟）……", where);
   await tick();
   try {
     const cache = {};
@@ -503,48 +1040,67 @@ function setupFlow(setup, pwSigners) {
   const cands = (pwSigners || []).filter(x => x && x.credId && x.kdf && x.fingerprint);
   if (!cands.length) return fail("setup 链接没带人的密码钥 —— 请会话重出 `vane sign setup-link`");
   const names0 = (Array.isArray(setup.who) ? setup.who : []).map(s => String(s).trim()).filter(Boolean);
-  const c = card(`<p style="font-size:18px"><b>设这台设备的 passkey：输一次密码，再逐个按一下</b></p>
-    <p class="muted">每个名字在这台设备上新设一把 passkey（iCloud 钥匙串 / Windows Hello / 安全钥都行）；全设好，这一页用你的密码一次担保它们。
-    密码只在这台设备的浏览器里算钥、签担保，不发给任何地方。把最后给的那段 JSON 贴回会话，这几把当场就是签字人，之后签字按指纹就行。</p>
-    <p class="muted">要设的名字（逗号隔开，可以改）：</p><input data-k="who" autocomplete="off" value="${esc(names0.join(", "))}">
-    <p class="muted">担保用人的密码钥：${cands.map(x => esc(x.principal) + "（钥 <span class=\"mono\">" + esc(String(x.fingerprint).slice(0, 16)) + "…</span>）").join("、")}</p>
-    <input type="password" data-k="pw" autocomplete="current-password" placeholder="vane 的密码"><button data-k="go">验密码</button>`);
-  const who = c.querySelector('[data-k="who"]'), pin = c.querySelector('[data-k="pw"]'), go = c.querySelector('[data-k="go"]');
-  go.onclick = async () => {
+  document.title = "设 passkey · vane 签字";
+  const steps = h("ol", {class: "steps"}, h("li", {class: "now"}, "输一次密码"), h("li", {}, "逐个设 passkey"), h("li", {}, "贴回会话"));
+  const setStep = k => [...steps.children].forEach((li, i) => { li.className = i < k ? "done" : i === k ? "now" : ""; });
+  app.replaceChildren(hero("一次设好", "设这台设备的 passkey",
+    "输一次密码，再逐个名字按一下：每个名字在这台设备上新设一把 passkey（iCloud 钥匙串 / Windows Hello / 安全钥都行）；全设好，这一页用你的密码一次担保它们。" +
+    "密码只在这台设备的浏览器里算钥、签担保，不发给任何地方。把最后给的那段 JSON 贴回会话，这几把当场就是签字人，之后签字按指纹就行。"), steps);
+  const who = h("input", {class: "input", autocomplete: "off", value: names0.join(", ")});
+  const pin = h("input", {class: "input", type: "password", autocomplete: "current-password", placeholder: "vane 的密码"});
+  const go = h("button", {class: "btn primary", type: "button"}, icon("lock"), h("span", {text: "验密码"}));
+  const c = h("section", {class: "card"}, h("h3", {text: "① 输一次密码"}),
+    h("label", {class: "field"}, h("span", {text: "要设的名字（逗号隔开，可以改）"}), who),
+    h("p", {class: "muted"}, "担保用人的密码钥：", cands.map((x, i) => [i ? "、" : "", x.principal + "（钥 ", h("span", {class: "mono", text: String(x.fingerprint).slice(0, 16) + "…"}), "）"])),
+    h("label", {class: "field"}, h("span", {text: "密码"}), pin), h("div", {class: "btnrow"}, go));
+  app.append(c);
+  const submit = async () => {
+    if (go.disabled) return;
     go.disabled = true;
     try {
       const names = [...new Set(who.value.split(/[,，、\s]+/).map(s => s.trim()).filter(Boolean))];
       if (!names.length) throw new Error("至少写一个名字");
       if (names.length > 8) throw new Error("一次最多设 8 把");
-      const m = await pwMatch(pin.value, cands);
-      app.querySelectorAll(".card .err").forEach(e => e.closest(".card").remove());   // 先前输错的那几行收掉
+      const m = await pwMatch(pin.value, cands, c);
+      c.querySelectorAll(".notice.bad").forEach(e => e.remove());   // 先前输错的那几行收掉
       pin.value = ""; pin.disabled = true; who.disabled = true;
-      go.textContent = "密码对了（" + m.c.principal + "）：下面逐个按";
-      setupSteps(names, m, rec);
-    } catch (e) { go.disabled = false; fail(e); }
+      go.lastChild.textContent = "密码对了（" + m.c.principal + "）：下面逐个按";
+      setStep(1);
+      setupSteps(names, m, rec, setStep);
+    } catch (e) { go.disabled = false; fail(e, c); }
   };
+  go.onclick = submit;
+  pin.addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+  reveal(c);
 }
-function setupSteps(names, m, rec) {
+function setupSteps(names, m, rec, setStep) {
   const done = [];
   let finished = false;
+  const card2 = h("section", {class: "card"}, h("h3", {text: "② 逐个设 passkey"}),
+    h("p", {class: "muted", text: "每按一次，系统弹一次 Touch ID / Windows Hello / 安全钥（Safari 只认点出来的，所以一个一个按）。"}));
   const rows = names.map((n, i) => {
-    const c = card(`<p><span class="tag">${i + 1}</span><b>${esc(n)}</b> · <span class="muted" data-k="st">等着</span></p>
-      <button data-k="b">设 ${esc(n)} 的 passkey</button>`);
-    return {n, b: c.querySelector('[data-k="b"]'), st: c.querySelector('[data-k="st"]')};
+    const st = h("span", {class: "pill", text: "等着"});
+    const b = h("button", {class: "btn primary small", type: "button"}, icon("key"), h("span", {text: "设 " + n + " 的 passkey"}));
+    card2.append(h("div", {class: "setrow"}, h("div", {class: "who"}, h("span", {class: "num", text: String(i + 1)}), h("span", {text: n}), st), b));
+    return {n, b, st};
   });
-  const tail = card(`<button class="secondary" data-k="early" disabled>到这里就好：担保已经设好的这几把</button>`);
-  const early = tail.querySelector('[data-k="early"]');
+  const early = h("button", {class: "btn ghost", type: "button", disabled: true}, "到这里就好：担保已经设好的这几把");
+  card2.append(h("div", {class: "btnrow"}, early));
+  app.append(card2);
+  reveal(card2);
   async function finish() {
     if (finished || !done.length) return;
     finished = true;
     rows.forEach(r => { if (r.b.isConnected) r.b.disabled = true; });
-    tail.remove();
+    early.remove();
     const items = done.map(d => ({ns: ENROLL_NS, sha: d.sha, file: d.file}));
     const msg = concat(enc.encode(PW_PREFIX + "\n"), await sha256(enc.encode(chalTextOf(items))));
     const sig = await crypto.subtle.sign({name: "Ed25519"}, m.k.priv, msg);
     m.k = null;                                            // 签完就不留这把钥
     const vouch = withItems({schema: "vane.passkey.assertion.v1", kind: "password", credId: m.c.credId, signature: b64u(sig), by: m.c.principal}, items);
     for (const d of done) await rememberMe(STATE, d.reg);
+    chrome(STATE, done[done.length - 1].reg);
+    setStep(2);
     out("设好了：把下面这段贴回会话（只这一次）", {schema: "vane.passkey.setup.v1", registrations: done.map(d => d.reg), vouch},
       "这里是 " + done.length + " 把 passkey 的公钥与设备证明（" + done.map(d => d.reg.principal + " 钥 " + d.reg.fingerprint.slice(0, 16) + "…").join("；") +
       "），加上你的密码对它们的担保；没有密码、没有私钥。会话 `vane sign setup '<JSON>'` 写登记记录、验担保 —— 验过，这几把当场是签字人。");
@@ -553,88 +1109,118 @@ function setupSteps(names, m, rec) {
     r.b.disabled = i > 0;
     r.b.onclick = async () => {
       r.b.disabled = true; early.disabled = true;           // 正在设的这一把没好之前不收尾（免得它落在担保外面）
+      r.st.textContent = "正在设 ……"; r.st.className = "pill busy";
       try {
         const reg = await createPasskey(r.n);
         const text = recordText(reg, rec);
         done.push({reg, sha: hex(await sha256(enc.encode(text))), file: "signers/" + slugOf(r.n) + "-" + reg.fingerprint.slice(0, 12) + ".json"});
-        r.st.textContent = "设好了：钥 " + reg.fingerprint.slice(0, 16) + "…";
-        r.st.className = "okc";
+        r.st.textContent = "设好了 · 钥 " + reg.fingerprint.slice(0, 16) + "…";
+        r.st.className = "pill ok";
         r.b.remove();
         if (i + 1 < rows.length) { rows[i + 1].b.disabled = false; early.disabled = false; }
         else await finish();
-      } catch (e) { if (!finished) { r.b.disabled = false; early.disabled = !done.length; } fail(e); }
+      } catch (e) {
+        if (!finished) { r.b.disabled = false; early.disabled = !done.length; r.st.textContent = "没设成"; r.st.className = "pill"; }
+        fail(e, card2);
+      }
     };
   });
-  early.onclick = () => finish().catch(fail);
+  early.onclick = () => finish().catch(e => fail(e, card2));
 }
 
 // ---------------------------------------------------------------- 首页（没有链接时）
+function how() {
+  return h("div", {class: "how"},
+    h("div", {}, h("b", {text: "① 会话给链接"}), "要你签什么，会话就给一个链接；内容全在链接 # 后面，不发给任何服务器。"),
+    h("div", {}, h("b", {text: "② 看一眼"}), "建议的那几项已经替你勾好、选好；每一件的原文都摆着，签的就是这些字节。"),
+    h("div", {}, h("b", {text: "③ 按一次"}), "Touch ID / Windows Hello / PIN / 安全钥。私钥在设备里，这一页拿不到。"));
+}
 function home(state, me) {
+  document.title = "vane 签字";
   if (me) {
-    const c = card(`<p class="okc"><b>这台电脑已经登记：${esc(me.principal)}</b>（钥 <span class="mono">${esc(me.fingerprint.slice(0, 16))}…</span>）</p>
-      <p class="muted">不用再做什么：会话给的签字链接直接在这里打开，读了再按一次指纹 / PIN。签字页有新版本时，链接会把它带来，这一页验过根签字人的签名自己换上。</p>
-      <button class="secondary" data-k="show">再看一次登记的那段 JSON</button><button class="secondary" data-k="again">再登记一把（另一个人 / 另一把安全钥）</button>
-      <button class="secondary" data-k="pw">设一个密码（也能签）</button>`);
-    c.querySelector('[data-k="show"]').onclick = () => showEnrolled(me, false);
-    c.querySelector('[data-k="again"]').onclick = () => enrollForm(state, me);
-    c.querySelector('[data-k="pw"]').onclick = () => passwordForm();
+    const more = h("div", {});
+    app.replaceChildren(hero("签字页", "这台设备可以签了",
+      "不用再做什么：会话给的签字链接直接在这里打开，看一眼，按一次指纹 / PIN。签字页有新版本时，链接会把它带来，这一页验过根签字人的签名自己换上。"),
+      h("section", {class: "card"},
+        h("div", {class: "status-row"}, h("span", {class: "badge-ic"}, icon("check")),
+          h("div", {}, h("h3", {text: "已登记：" + me.principal}), h("div", {class: "meta mono", text: "钥 " + String(me.fingerprint).slice(0, 16) + "… · " + (me.rpId || location.hostname)}))),
+        h("div", {class: "btnrow"},
+          h("button", {class: "btn ghost small", type: "button", onclick: () => { more.replaceChildren(); resultHost = more; showEnrolled(me, false); }}, "再看一次登记的那段 JSON"),
+          h("button", {class: "btn ghost small", type: "button", onclick: () => { more.replaceChildren(); enrollForm(state, me, more); }}, "再登记一把（另一个人 / 另一把安全钥）"),
+          h("button", {class: "btn ghost small", type: "button", onclick: () => { more.replaceChildren(); passwordForm(more, true); }}, "设一个密码（也能签）"))),
+      more, how());
     return;
   }
-  enrollForm(state, null);
+  app.replaceChildren(hero("签字页", "登记这台设备，成为 vane 的签字人",
+    "有 vane 的人都可以签；签 = 为你批准的东西负责。每台设备登记一次，以后只点会话给的链接。"));
+  enrollForm(state, null, app);
+  app.append(how());
 }
-function passwordForm() {                                   // 2.6.0
-  const c = card(`<p><b>设一个签字密码</b>（和 passkey 一样能签；忘了 passkey 设备也还能签）</p>
-    <p class="muted">密码在这一页里变成一把签名钥（scrypt + Ed25519），只交出公钥。贴回会话之后，用你的 passkey 担保一次，这把密码钥就是签字人。密码只有你自己输：
-    会话（AI）拿不到它，环境变量里的密码也不能签。至少 12 个字符，几个不相干的词最好。</p>
-    <input placeholder="你的名字（GitHub 用户名）" autocomplete="username" data-k="who"><input type="password" placeholder="签字密码" autocomplete="new-password" data-k="pw">
-    <input type="password" placeholder="再输一次" autocomplete="new-password" data-k="again"><button>用这个密码登记</button>`);
-  const btn = c.querySelector("button"), q = k => c.querySelector('[data-k="' + k + '"]').value;
-  btn.onclick = () => { btn.disabled = true; enrollPassword(q("who").trim(), q("pw"), q("again")).catch(e => { btn.disabled = false; fail(e); }); };
+function passwordForm(where, open) {                        // 2.6.0
+  const who = h("input", {class: "input", placeholder: "你的名字（GitHub 用户名）", autocomplete: "username"});
+  const pw = h("input", {class: "input", type: "password", placeholder: "签字密码", autocomplete: "new-password"});
+  const again = h("input", {class: "input", type: "password", placeholder: "再输一次", autocomplete: "new-password"});
+  const btn = h("button", {class: "btn ghost", type: "button"}, icon("lock"), h("span", {text: "用这个密码登记"}));
+  const c = h("details", {class: "card", open: !!open}, h("summary", {}, icon("chev"), "设一个签字密码（和 passkey 一样能签；忘了 passkey 设备也还能签）"),
+    h("p", {class: "muted", text: "密码在这一页里变成一把签名钥（scrypt + Ed25519），只交出公钥。贴回会话之后，用你的 passkey 担保一次，这把密码钥就是签字人。密码只有你自己输：" +
+      "会话（AI）拿不到它，环境变量里的密码也不能签。至少 12 个字符，几个不相干的词最好。"}),
+    h("label", {class: "field"}, h("span", {text: "名字"}), who), h("label", {class: "field"}, h("span", {text: "签字密码"}), pw),
+    h("label", {class: "field"}, h("span", {text: "再输一次"}), again), h("div", {class: "btnrow"}, btn));
+  btn.onclick = () => { btn.disabled = true; enrollPassword(who.value.trim(), pw.value, again.value, c).catch(e => { btn.disabled = false; fail(e, c); }); };
+  (where || app).append(c);
 }
-function enrollForm(state, me) {
-  const c = card(`<p><b>成为 vane 的签字人：登记这台电脑的 passkey</b>（每台电脑一次）</p>
-    <p class="muted">有 vane 的人都可以签；签 = 为你批准的东西负责。写下名字、按这台电脑的验证（Windows Hello PIN / 指纹 / Touch ID / USB 安全钥），会给出一段公钥和设备的证明（都不是秘密），贴回会话。
-    钥是用来挡住不稳定的 AI 的，不是用来挡人的：设备证明得了是硬件，当场就是签字人；证明不了，任一位签字人点一下确认你是人。</p>
-    <input placeholder="你的名字（GitHub 用户名）" autocomplete="username"><button>登记这台电脑的 passkey</button>`);
-  const btn = c.querySelector("button"), inp = c.querySelector("input");
-  btn.onclick = () => { btn.disabled = true; enroll(state, inp.value.trim(), me).catch(e => { btn.disabled = false; fail(e); }); };
-  passwordForm();
+function enrollForm(state, me, where) {
+  const inp = h("input", {class: "input", placeholder: "你的名字（GitHub 用户名或你在团队里的名字）", autocomplete: "username"});
+  const btn = h("button", {class: "btn primary", type: "button"}, icon("key"), h("span", {text: "登记这台设备的 passkey"}));
+  const c = h("section", {class: "card"}, h("h3", {text: "登记这台设备的 passkey（每台设备一次）"}),
+    h("p", {class: "muted", text: "写下名字、按这台设备的验证（Windows Hello PIN / 指纹 / Touch ID / USB 安全钥），会给出一段公钥和设备的证明（都不是秘密），贴回会话。" +
+      "钥是用来挡住不稳定的 AI 的，不是用来挡人的：设备证明得了是硬件，当场就是签字人；证明不了，任一位签字人点一下确认你是人。"}),
+    h("label", {class: "field"}, h("span", {text: "名字"}), inp), h("div", {class: "btnrow"}, btn));
+  const run = () => { if (btn.disabled) return; btn.disabled = true; enroll(state, inp.value.trim(), me).catch(e => { btn.disabled = false; fail(e, c); }); };
+  btn.onclick = run;
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+  (where || app).append(c);
+  passwordForm(where || app, false);
 }
 
+// ---------------------------------------------------------------- 开页
+document.getElementById("mark").append(icon("mark"));
 window.addEventListener("hashchange", () => location.reload());   // 已开着的页上换链接（只变 # 后面）也重读（2026-10-21 用户「nothing happen」）
 (async () => {
   const state = await loadState();
   STATE = state;
   const me = rememberedMe(state);
-  document.getElementById("foot").textContent = "签字页 " + PAGE_VERSION + (state ? " · 页面 " + String(state.page || "").slice(0, 12) + "… · " + (state.box ? "箱 " + state.box : "装的时候那一版") +
-    " · 认的根签字人 " + (((state.roots || {}).signers || []).length) + " 位 · " + state.loader : " · 本机小服务没回话（不能自己更新）");
-  if (!window.PublicKeyCredential) return fail("这个浏览器不支持 passkey（要 Chrome / Edge / Safari 的新版本）");
+  chrome(state, me);
+  if (!window.PublicKeyCredential) {                       // 2.12.0：用不了 passkey 的浏览器（例如某个 app 里面的浏览器）—— 说清楚，给复制链接
+    app.replaceChildren(hero("用不了 passkey", "这个浏览器签不了字",
+      "这一页要用这台设备的 passkey（Touch ID / Windows Hello / PIN / 安全钥）签，这个浏览器不支持。如果是在某个 app 里面的浏览器打开的，把链接复制到 Safari / Chrome / Edge 打开 —— 要签的内容全在链接里，一个字不变。"),
+      h("div", {class: "btnrow"}, copyLinkButton()));
+    return;
+  }
   if (location.hostname !== "localhost" && !CLOUD_HOSTS.includes(location.hostname))
     return fail("要从 http://localhost:8765/（本机）或 https://mxx-yyl.github.io/signPage/（云端）打开（passkey 认的是这两处）");
-  if (CLOUD_HOSTS.includes(location.hostname))
-    document.getElementById("foot").textContent = "签字页 " + PAGE_VERSION + " · 云端签字页（GitHub Pages）· 没有本机小服务：签完把那段 JSON 贴回云会话";
   let payload = null;
   try { payload = await readPayload(); } catch (e) { return fail("链接读不动：" + e.message); }
   if (payload && payload.release) {
     const r = await considerRelease(state, payload.release, me);
     if (r.status === "install") {
-      card(`<p class="okc"><b>签字页有新版本（箱 ${esc(r.manifest.box)}），根签字人 ${esc(r.by)} 签过 —— 正在换上…</b></p>`);
-      try { return await install(state, payload.release, payload.release.assertion, r.manifest); } catch (e) { fail(e); }
+      busy("签字页有新版本（箱 " + r.manifest.box + "），根签字人 " + r.by + " 签过 —— 正在换上…", banner);
+      try { return await install(state, payload.release, payload.release.assertion, r.manifest); } catch (e) { fail(e, banner); }
     } else if (r.status === "needs-local") {
-      const c = card(`<p class="warn"><b>签字页有新版本（箱 ${esc(r.manifest.box)}）</b></p>
-        <p class="muted">这台电脑还不认任何根签字人（第一次装的时候名单是空的），所以由你自己决定要不要换：只在你知道 vane 刚登记了新的签字页时才换。不换也照样能签下面的东西。</p>
-        <button class="secondary">用我的 passkey 批准，换成新版</button>`);
-      const b = c.querySelector("button");
-      b.onclick = () => { b.disabled = true; approveLocally(state, payload.release, me, r.manifest).catch(e => { b.disabled = false; fail(e); }); };
+      const b = h("button", {class: "btn ghost small", type: "button"}, icon("key"), h("span", {text: "用我的 passkey 批准，换成新版"}));
+      const nb = notice("warn", "签字页有新版本（箱 " + r.manifest.box + "）", h("div", {},
+        h("p", {text: "这台电脑还不认任何根签字人（第一次装的时候名单是空的），所以由你自己决定要不要换：只在你知道 vane 刚登记了新的签字页时才换。不换也照样能签下面的东西。"}),
+        h("div", {class: "btnrow"}, b)), banner);
+      b.onclick = () => { b.disabled = true; approveLocally(state, payload.release, me, r.manifest).catch(e => { b.disabled = false; fail(e, nb); }); };
     } else if (r.status === "rejected") {
-      card(`<p class="warn"><b>链接带来的签字页新版本没有换上</b>：${esc(r.note)}。</p><p class="muted">下面照样用这台电脑上现在这一页签。</p>`);
+      notice("warn", "链接带来的签字页新版本没有换上", r.note + "。下面照样用这台电脑上现在这一页签。", banner);
     }
   }
   if (payload && payload.setup) return setupFlow(payload.setup, payload.pw);   // 2.10.0：一次密码设 passkey
   if (payload && (payload.items || []).length) return showItems(payload.items, me, payload.ret, payload.pw);
   if (payload && payload.release) return;
   home(state, me);
-})().catch(fail);
+})().catch(e => fail(e));
 </script>
 </body>
 </html>

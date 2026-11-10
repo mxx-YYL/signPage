@@ -704,6 +704,73 @@ async function signWithPassword(items, pw, cands, ret, signed) {   // 2.6.0：�
   if (signed) signed();
   return deliver(hit, items, ret);
 }
+
+async function licenseFlow(spec, pwSigners) {
+  const source = spec && Array.isArray(spec.items) ? spec.items : [];
+  if (!source.length) return fail("授权链接没有带待批准的 license");
+  const items = [];
+  for (const it of source) {
+    if (it.ns !== "vane-release") return fail("授权链接的命名空间不对 —— 不签");
+    const text = it.t !== undefined ? String(it.t) : null;
+    const bytes = text === null ? unb64u(it.c || "") : enc.encode(text);
+    const sha = hex(await sha256(bytes));
+    if (it.sha && it.sha !== sha) return fail("授权原文与 sha 不一致 —— 不签");
+    items.push({ns: it.ns, sha, file: it.file || "", text, label: String(it.label || ""), def: it.def === true});
+  }
+
+  let selected = items.find(it => it.def) || items[0];
+  const cands = (pwSigners || []).filter(x => x && x.credId && x.kdf && x.fingerprint);
+  if (!cands.length) return fail("授权链接没有带人的密码钥 —— 请发行方重新生成 license 激活链接");
+
+  document.title = "激活 vane license";
+  app.replaceChildren(hero("云端授权", "激活 vane license",
+    "这是一次云端机器授权。请核对机器、频道和授权正文，再在本页输入人的密码；密码只在浏览器本地派生签名，不会上传。",
+    h("div", {class: "stats"}, h("span", {class: "stat"}, icon("lock"), "密码只在本页使用"),
+      h("span", {class: "stat"}, icon("cloud"), "云端机器授权"))));
+
+  const options = h("div", {class: "opts", role: "radiogroup", "aria-label": "授权期限"});
+  const raw = h("div", {class: "card"});
+  items.forEach((it, i) => {
+    const radio = h("input", {type: "radio", name: "license-mode", value: String(i)});
+    const label = h("label", {class: "opt" + (it === selected ? " sel" : "")}, radio, icon("check", "tick"),
+      h("span", {text: it.label || (i === 0 ? "每年检验一次" : "永久")}));
+    radio.checked = it === selected;
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      selected = it;
+      options.querySelectorAll(".opt").forEach((el, n) => el.classList.toggle("sel", n === i));
+      raw.replaceChildren(h("pre", {class: "doc", text: selected.text || "（无正文）"}));
+    });
+    options.append(label);
+  });
+  raw.append(h("pre", {class: "doc", text: selected.text || "（无正文）"}));
+  app.append(h("section", {class: "block"},
+    h("div", {class: "block-head"}, h("h2", {text: "选择授权期限"})),
+    h("div", {class: "card"}, options),
+    h("div", {class: "card"}, h("h3", {text: "授权原文"}), raw)));
+
+  const pin = h("input", {class: "input", type: "password", autocomplete: "current-password", placeholder: "人的 vane 密码"});
+  const button = h("button", {class: "btn primary big", type: "button"}, icon("lock"), h("span", {text: "批准并生成 license 签名"}));
+  const result = h("div", {class: "results"});
+  resultHost = result;
+  app.append(h("section", {class: "block"},
+    h("div", {class: "block-head"}, h("h2", {text: "本人批准"})),
+    h("div", {class: "card"},
+      h("p", {class: "muted", text: "输入人的 vane 密码。密码只用于本地 scrypt + Ed25519 签名，页面不会把密码交给云端。"}),
+      pin, h("div", {class: "btnrow"}, button), result)));
+
+  button.onclick = async () => {
+    if (!pin.value) { pin.focus(); return; }
+    button.disabled = true;
+    try {
+      await signWithPassword([selected], pin.value, cands, null, () => { pin.value = ""; });
+    } catch (e) {
+      button.disabled = false;
+      fail(e, result);
+    }
+  };
+}
+
 async function deliver(res, items, ret) {
   const one = items.length === 1;
   const where = host();
@@ -1191,16 +1258,17 @@ window.addEventListener("hashchange", () => location.reload());   // 已开着�
   STATE = state;
   const me = rememberedMe(state);
   chrome(state, me);
+  if (location.hostname !== "localhost" && !CLOUD_HOSTS.includes(location.hostname))
+    return fail("要从 http://localhost:8765/（本机）或 https://mxx-yyl.github.io/signPage/（云端）打开（passkey 认的是这两处）");
+  let payload = null;
+  try { payload = await readPayload(); } catch (e) { return fail("链接读不动：" + e.message); }
+  if (payload && payload.license) return licenseFlow(payload.license, payload.pw);   // 云端 license 激活不要求浏览器支持 WebAuthn
   if (!window.PublicKeyCredential) {                       // 2.12.0：用不了 passkey 的浏览器（例如某个 app 里面的浏览器）—— 说清楚，给复制链接
     app.replaceChildren(hero("用不了 passkey", "这个浏览器签不了字",
       "这一页要用这台设备的 passkey（Touch ID / Windows Hello / PIN / 安全钥）签，这个浏览器不支持。如果是在某个 app 里面的浏览器打开的，把链接复制到 Safari / Chrome / Edge 打开 —— 要签的内容全在链接里，一个字不变。"),
       h("div", {class: "btnrow"}, copyLinkButton()));
     return;
   }
-  if (location.hostname !== "localhost" && !CLOUD_HOSTS.includes(location.hostname))
-    return fail("要从 http://localhost:8765/（本机）或 https://mxx-yyl.github.io/signPage/（云端）打开（passkey 认的是这两处）");
-  let payload = null;
-  try { payload = await readPayload(); } catch (e) { return fail("链接读不动：" + e.message); }
   if (payload && payload.release) {
     const r = await considerRelease(state, payload.release, me);
     if (r.status === "install") {

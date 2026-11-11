@@ -2,13 +2,34 @@
 
 页面地址：**https://mxx-yyl.github.io/signPage/**
 
-这一页就是 vane 的签字页 `software/src/vane/signpage/index.html`（2.12.0），逐字节同一份：
+> **现状（2026-11-11 核对）：main 上的 `index.html` 不是 vane 箱里封的那一份。**
+> 提交 `5aa5d1a`（2026-11-10 16:01 +0800，网页上传）把它换成了下表第一行的那一份：在 2.12.0 上多了一段「云端授权」流程（下面一节），页内版本号仍写 2.12.0。
+> vane 仓 `software/src/vane/signpage/index.html` 与箱里封的仍是 2.12.0 原来那一份（现行箱 `6b37f5a55845` 里也是它）。
+> 所以「谁能改这一页」一节里的核对此刻对不上箱 —— 要对上，得把这一版收回 vane 仓、抬版本号、出签字页发布单（命名空间 `vane-signpage`）、登记（vane memo D-334 第五节；要用户批准）。
 
-| 文件 | sha256 |
-|---|---|
-| `index.html` | `3cd4856d7ab23de10bb419d5b6c498974374d19c92547d28ec6a6994660d3116` |
+| 文件 | 在哪 | sha256 |
+|---|---|---|
+| `index.html`（main 现行：云端签字页供的就是它） | 本仓 `5aa5d1a` | `6ef47bf2b5d132190a52ce921af5bdac5fdae35234edfba1304dd6a979373168` |
+| `index.html`（2.12.0：vane 登记过、箱里封的） | 本仓 `9c3d9ab`；vane `software/src/vane/signpage/index.html` | `3cd4856d7ab23de10bb419d5b6c498974374d19c92547d28ec6a6994660d3116` |
 
-vane 那边：登记 `6b00f01cb5a1`（2026-11-06，susuqni 用 iCloud passkey 在这一页上签的许可 6b00f01cb5a1，memo D-311）把这一份字节封进箱 `6b00f01cb5a1`。
+vane 那边：登记 `6b00f01cb5a1`（2026-11-06，susuqni 用 iCloud passkey 在这一页上签的许可 6b00f01cb5a1，memo D-311）把 2.12.0 那一份字节封进箱 `6b00f01cb5a1`。
+
+## 云端授权（license）—— `5aa5d1a` 加的那一段
+
+用户 2026-11-11：「特别注意云端的license 和 签字都是默认走mxx-yyl.github.io/signpage」。
+
+云端的机器（云会话、远程服务器）上没有使用者能输密码的终端，也打不开它的部署页，所以生产版的授权在云端走这一页：
+
+1. 云端那台机器 `vane license request` 出请求码；发行方 `vendor_tool.py issue` 出两份候选（每年检验 / 永久），`vendor_tool.py link` 出链接（生产版 susu-7.0 起默认就是这种）。
+2. 链接 `#v1.` 后面的载荷带 `license.items`（每一项：`ns` = `vane-release`、`t` = 候选的正文、`sha`、`file`、`label`、`def`）与 `pw`（人的密码钥公开的那一半）。
+   带 `license` 才进「云端授权 · 激活 vane license」：核对机器、频道与授权原文，单选「每年检验一次 / 永久」，输 vane 密码批准 —— 不要 passkey、不要求浏览器支持 WebAuthn。
+3. 密码在这一页里变成签名钥（scrypt → Ed25519，与「输密码签」同一段代码），只签选中的那一份；页面给出一段 JSON，贴回发行方 `vendor_tool.py finalize --assertion '<JSON>'`，
+   验过才签出授权文件，云端那台机器 `vane license install`。
+
+核过的（2026-11-11，vane 生产版 susu-7.0 的发版自测）：这一份字节在无头 Chromium 里按原址打开，license 链接 → 选项 → 输密码 → 断言 → `finalize` → `vane license install`「批准成立」；
+整个过程页面没有向任何地址发请求（除了加载它自己）。`5aa5d1a` 对 2.12.0 的改动是 `licenseFlow` 一个函数与入口处的分流（72 行加、4 行挪），签名走原来的 `signWithPassword`。
+没核过的：没有连真的 github.io（那台构建机连不到），用的是测试批准人的密码、不是真的 vane 密码。
+2.12.0 那一份不认 `license`：同一条链接打开是首页。顶层 `items` 的老格式（`vendor_tool.py link --passkey`）在两份页面上都是普通的等签件，只能用 passkey 签。
 
 ## 2.12.0：界面全面重画、主动替你勾好建议项
 
@@ -52,6 +73,7 @@ passkey 绑在建立它的网站上：签字在 mxx-yyl.github.io 上签，passk
 - **收回云会话对这个仓的写权限**（GitHub 设置 → Applications → Installed GitHub Apps → Claude → Configure，去掉 signPage），或者保护 main（只让 PR 进、你自己合）；
 - 每一次改动都是这里的一个提交，逐行看得到；
 - 核对：`curl -s https://mxx-yyl.github.io/signPage/ | sha256sum` 应当等于上面的 sha256，也等于 vane 登记时封进箱的那一份。
+  **此刻（`5aa5d1a` 之后）它应当等于最上面表里的第一行 `6ef47bf2…`，与箱里的 `3cd4856d…` 不同** —— 这一版还没有回到 vane 登记（见最上面的现状）。
 
 ## 设置（一次）
 

@@ -263,7 +263,8 @@ textarea.json{display:block;width:100%;min-height:120px;margin-top:8px;padding:1
 //        pasting the schema」）：云端签字页认短链接 `#q=<号>.<钥>`（请求按号从只放数据的邮箱仓取、用链接里的钥解开，之后与 `#v1.` 同一条路：照旧自己算 sha、摆原文）；
 //        签完给**一行码** `vsig1.…`（没有引号、没有空格），并带你去 GitHub 的新建文件页（文件名与内容已经填好）—— 点一下 Commit changes，会话自己取回；
 //        那一页去不了就把这一行码贴回会话。本机 / VM 的签法、签的字节、challenge 一样不变。
-const PAGE_VERSION = "2.13.0";                           // 2.12.0（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：
+const PAGE_VERSION = "2.13.1";                           // 2.12.0（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：
+                                                         // 2.13.1（memo D-404，用户 2026-11-18「signpage頁面在repo上有，是一個公開的repo」）：邮箱就是 signPage 仓自己（q/、a/ 两个目录）—— 邮箱仓 vane-sign-inbox 没有建
                                                           // 界面整个重画 —— 签法、签的字节、给出的 JSON 一样不变（challenge / 断言 / 登记 / setup 的代码原样搬过来）；
                                                           // 批准件每件一个勾（默认勾上；去掉的这次不签、留着下次）；单选按线归拢，每一问都预先选好建议项并写明为什么
                                                           // （会话标的默认，连同会话给的理由 > 不放宽 / 照原来的做法），改了一条线可以一键带上同一批的其余线；
@@ -286,7 +287,7 @@ const PAGE_VERSION = "2.13.0";                           // 2.12.0（用户 2026
                                                           // 可以再设一个密码，「输密码签」与「用 passkey 签」等价；密码只在这一页里用（scrypt -> Ed25519），不发给任何地方
 // 2.5.0                            // 2.5.0（用户 2026-10-22「vane可能終端有好幾個用戶，每換一個用戶不是說項目不能跑，是繼續跑，passkey只是防止ai 不穩定行為不是人，只要有passkey就可以通過」）：
                                                           // 同一台电脑上登记过的谁都能签（签的时候不再只认最先登记的那一把）、可以再登记另一个人；认人归会话那边按钥认
-const MAIL_REPO = "mxx-YYL/vane-sign-inbox";            // 2.13.0：邮箱仓（公开、只放数据：请求是密文，回执不是秘密）。**写死在页面里** —— 链接改不了它
+const MAIL_REPO = "mxx-YYL/signPage";                   // 2.13.1：邮箱就是这一页所在的公开仓（q/ 放密文请求、a/ 放回执；都不是秘密）。**写死在页面里** —— 链接改不了它
 const MAIL_RAW = "https://raw.githubusercontent.com/" + MAIL_REPO + "/main/q/";
 const CODE_ORIGINS = ["https://mxx-yyl.github.io", "http://localhost:8765", "http://localhost:8767"];   // 与 vane/courier.py 的 ORIGINS 同一份、同一个次序（码里只带下标）
 const CHROME_EXTRA = ',"other_keys_can_be_added_here":"do not compare clientDataJSON against a template. See https://goo.gl/yabPex"';

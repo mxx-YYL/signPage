@@ -263,7 +263,8 @@ textarea.json{display:block;width:100%;min-height:120px;margin-top:8px;padding:1
 //        pasting the schema」）：云端签字页认短链接 `#q=<号>.<钥>`（请求按号从只放数据的邮箱仓取、用链接里的钥解开，之后与 `#v1.` 同一条路：照旧自己算 sha、摆原文）；
 //        签完给**一行码** `vsig1.…`（没有引号、没有空格），并带你去 GitHub 的新建文件页（文件名与内容已经填好）—— 点一下 Commit changes，会话自己取回；
 //        那一页去不了就把这一行码贴回会话。本机 / VM 的签法、签的字节、challenge 一样不变。
-const PAGE_VERSION = "2.13.1";                           // 2.12.0（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：
+const PAGE_VERSION = "2.13.2";                           // 2.13.2（memo D-404，用户 2026-11-18）：签完只给一行码（复制、贴回会话），不再带人去 GitHub 提交 —— 那个仓是公开的
+//                           // 2.12.0（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：
                                                          // 2.13.1（memo D-404，用户 2026-11-18「signpage頁面在repo上有，是一個公開的repo」）：邮箱就是 signPage 仓自己（q/、a/ 两个目录）—— 邮箱仓 vane-sign-inbox 没有建
                                                           // 界面整个重画 —— 签法、签的字节、给出的 JSON 一样不变（challenge / 断言 / 登记 / setup 的代码原样搬过来）；
                                                           // 批准件每件一个勾（默认勾上；去掉的这次不签、留着下次）；单选按线归拢，每一问都预先选好建议项并写明为什么
@@ -848,16 +849,8 @@ async function deliver(res, items, ret) {
   const code = codeOf(res, items);
   if (code) {
     try { sessionStorage.setItem("vane.code." + MAIL.id, code); } catch (e) {}
-    if (MAIL.repo === MAIL_REPO && CLOUD_HOSTS.includes(location.hostname)) {
-      const u = "https://github.com/" + MAIL_REPO + "/new/main?filename=" + encodeURIComponent("a/" + MAIL.id + ".txt") + "&value=" + encodeURIComponent(code);
-      const go = h("a", {class: "btn primary big", href: u, rel: "noopener"}, icon("check"), h("span", {text: "去 GitHub 点一下 Commit changes"}));
-      notice("ok", "签好了 —— 还差一下", h("div", {},
-        h("p", {text: "正在带你去 GitHub 的新建文件页：文件名与内容已经填好，只要点页面上的 Commit changes，会话就自己取回这次签名。"}),
-        h("div", {class: "btnrow"}, go)), where);
-      out("去不了 GitHub？把这一行贴回会话", code, "一行，没有引号、没有空格（" + code.length + " 个字符）；" + (one ? "只批准上面那一份文件的这几个字节" : "批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "。");
-      setTimeout(() => location.assign(u), 1200);
-      return;
-    }
+    // 2.13.2（memo D-404；用户 2026-11-18「不管怎麼說，都不應該讓用戶進行提交github，那個倉庫是公開的啊」）：签完不再带你去 GitHub 提交 ——
+    // 回执只给这一行码，贴回会话（或贴进会话给的私有页）。
     out("签好了：把这一行贴回会话", code, "一行，没有引号、没有空格（" + code.length + " 个字符）；" + (one ? "只批准上面那一份文件的这几个字节" : "批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "。会话 `vane sign courier take '<这一行>'` 验过才落。");
     return;
   }

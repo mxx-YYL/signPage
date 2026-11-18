@@ -259,7 +259,11 @@ textarea.json{display:block;width:100%;min-height:120px;margin-top:8px;padding:1
 <noscript><p style="padding:16px">这一页要 JavaScript 才能签字。</p></noscript>
 <script>
 "use strict";
-const PAGE_VERSION = "2.12.0";                           // 2.12.0（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：
+// 2.13.0（memo D-387，用户 2026-11-13「Cloud signing is currently a major issue … it failed every time due to truncation … The user only signs, at most
+//        pasting the schema」）：云端签字页认短链接 `#q=<号>.<钥>`（请求按号从只放数据的邮箱仓取、用链接里的钥解开，之后与 `#v1.` 同一条路：照旧自己算 sha、摆原文）；
+//        签完给**一行码** `vsig1.…`（没有引号、没有空格），并带你去 GitHub 的新建文件页（文件名与内容已经填好）—— 点一下 Commit changes，会话自己取回；
+//        那一页去不了就把这一行码贴回会话。本机 / VM 的签法、签的字节、challenge 一样不变。
+const PAGE_VERSION = "2.13.0";                           // 2.12.0（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：
                                                           // 界面整个重画 —— 签法、签的字节、给出的 JSON 一样不变（challenge / 断言 / 登记 / setup 的代码原样搬过来）；
                                                           // 批准件每件一个勾（默认勾上；去掉的这次不签、留着下次）；单选按线归拢，每一问都预先选好建议项并写明为什么
                                                           // （会话标的默认，连同会话给的理由 > 不放宽 / 照原来的做法），改了一条线可以一键带上同一批的其余线；
@@ -282,6 +286,11 @@ const PAGE_VERSION = "2.12.0";                           // 2.12.0（用户 2026
                                                           // 可以再设一个密码，「输密码签」与「用 passkey 签」等价；密码只在这一页里用（scrypt -> Ed25519），不发给任何地方
 // 2.5.0                            // 2.5.0（用户 2026-10-22「vane可能終端有好幾個用戶，每換一個用戶不是說項目不能跑，是繼續跑，passkey只是防止ai 不穩定行為不是人，只要有passkey就可以通過」）：
                                                           // 同一台电脑上登记过的谁都能签（签的时候不再只认最先登记的那一把）、可以再登记另一个人；认人归会话那边按钥认
+const MAIL_REPO = "mxx-YYL/vane-sign-inbox";            // 2.13.0：邮箱仓（公开、只放数据：请求是密文，回执不是秘密）。**写死在页面里** —— 链接改不了它
+const MAIL_RAW = "https://raw.githubusercontent.com/" + MAIL_REPO + "/main/q/";
+const CODE_ORIGINS = ["https://mxx-yyl.github.io", "http://localhost:8765", "http://localhost:8767"];   // 与 vane/courier.py 的 ORIGINS 同一份、同一个次序（码里只带下标）
+const CHROME_EXTRA = ',"other_keys_can_be_added_here":"do not compare clientDataJSON against a template. See https://goo.gl/yabPex"';
+let MAIL = null, ALL_ITEMS = [];                          // 这一份请求的号（payload.mail）与它带来的全部的件（一行码里记「签了第几件」）
 const CLOUD_HOSTS = ["mxx-yyl.github.io"];               // 2.9.0：云端签字页（GitHub Pages 的 signPage 仓）—— passkey 认的是这个域名（susuqni）
 let STATE = null;                                         // 本机小服务的 /vane/state（2.2.0：带 relay = 它能把签名经 ssh 送回 VM）
 const PREFIX = "vane-passkey-v1";
@@ -458,7 +467,7 @@ function fail(e, where) {
   return n;
 }
 function out(title, obj, note) {                            // 一段要贴回会话的 JSON：大按钮复制；2.12.0 起先自己试着复制一次（浏览器不让就等人按）
-  const text = JSON.stringify(obj);
+  const text = typeof obj === "string" ? obj : JSON.stringify(obj);   // 2.13.0：一行码原样给（不加引号）
   const label = h("span", {text: "复制，贴回会话"});
   const btn = h("button", {class: "btn primary big", type: "button"}, icon("copy"), label);
   const state = h("p", {class: "copystate", role: "status"});
@@ -523,9 +532,47 @@ async function rememberMe(state, reg) {
 
 // ---------------------------------------------------------------- 链接带来的东西：#v1.<gzip(JSON) 的 base64url>（全在 # 后面，不发给任何服务器）
 async function readPayload() {
+  if (location.hash.startsWith("#q=")) return readByNumber(location.hash.slice(3));
   if (!location.hash.startsWith("#v1.")) return null;
   const stream = new Blob([unb64u(location.hash.slice(4))]).stream().pipeThrough(new DecompressionStream("gzip"));
   return JSON.parse(await new Response(stream).text());
+}
+// 2.13.0：短链接 `#q=<号>.<钥>` —— 按号从邮箱仓取密文（跨源只读数据，不执行），用 # 后面的钥解开（钥不发给任何服务器），得到与 #v1. 同一种请求。
+// 取到的东西不可信也无妨：解不开 / 号对不上就停；解开之后签的仍是这一页自己从原文算的 sha，摆给你读的就是那几个字节。
+async function readByNumber(s) {
+  const m = /^([a-z2-7]{8})\.([A-Za-z0-9_-]{22})$/.exec(s);
+  if (!m) throw new Error("短链接不完整（#q= 后面要「8 位的号.22 位的钥」）：从会话再复制一次");
+  if (!CLOUD_HOSTS.includes(location.hostname)) throw new Error("短链接只在云端签字页用；本机 / VM 用会话给的那条链接");
+  let r;
+  try { r = await fetch(MAIL_RAW + m[1], {cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer"}); }
+  catch (e) { throw new Error("邮箱够不着（网络）：稍等再刷新这一页"); }
+  if (!r.ok) throw new Error("邮箱里没有号是 " + m[1] + " 的请求（" + r.status + "）：会话可能还没推上去，等一分钟再刷新");
+  let p;
+  try {
+    const raw = unb64u((await r.text()).trim());
+    const key = await crypto.subtle.importKey("raw", unb64u(m[2]), "AES-GCM", false, ["decrypt"]);
+    const z = await crypto.subtle.decrypt({name: "AES-GCM", iv: raw.slice(0, 12)}, key, raw.slice(12));
+    p = JSON.parse(await new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream("gzip"))).text());
+  } catch (e) { throw new Error("这份请求用链接里的钥解不开（链接被截短了，或请求被改过）"); }
+  if (!p || !p.mail || p.mail.id !== m[1]) throw new Error("请求里的号与链接的不是同一个");
+  return p;
+}
+// 2.13.0：断言 -> 一行码 `vsig1.<号>.<签了第几件>.<凭据号>.<authenticatorData>.<签名>.<clientData>`（与 vane/courier.py 的 code_pack 同一个口径）。
+// clientDataJSON 与规格的那一句逐字节相同时只带一个记号（o<源的下标> / g<下标> = Chromium 多一栏的那一种），否则带全文。出不了码回 null（那就照旧给 JSON）。
+function codeOf(res, items) {
+  if (!MAIL || !/^[a-z2-7]{8}$/.test(String(MAIL.id || "")) || res.kind === "password") return null;
+  const idx = items.map(i => ALL_ITEMS.findIndex(x => x.ns === i.ns && x.sha === i.sha));
+  if (!idx.length || idx.some((v, k) => v < 0 || (k && v <= idx[k - 1])) || idx[idx.length - 1] > 62) return null;
+  let mask = 0n;
+  for (const v of idx) mask |= 1n << BigInt(v);
+  let cdj, chal;
+  try { cdj = new TextDecoder().decode(unb64u(res.clientDataJSON)); chal = JSON.parse(cdj).challenge; } catch (e) { return null; }
+  let cd = res.clientDataJSON;
+  CODE_ORIGINS.forEach((o, k) => {
+    const base = '{"type":"webauthn.get","challenge":"' + chal + '","origin":"' + o + '","crossOrigin":false';
+    if (cdj === base + "}") cd = "o" + k; else if (cdj === base + CHROME_EXTRA + "}") cd = "g" + k;
+  });
+  return ["vsig1", MAIL.id, mask.toString(16), res.credId, res.authenticatorData, res.signature, cd].join(".");
 }
 
 // ---------------------------------------------------------------- 验一份 passkey 断言（签字页发布单用；与 passkey.py 的 verify 同一套检查）
@@ -794,6 +841,23 @@ async function deliver(res, items, ret) {
     notice("ok", "签好了，正在送回 VM：" + back.origin, "收件页会说落了几件。连不上就点浏览器的「后退」回到这一页再签一次（链接还在）。", where);
     back.search = "?a=" + b64u(enc.encode(JSON.stringify(res)));
     location.assign(back.href);
+    return;
+  }
+  // 2.13.0：这份请求带着号（会话按号存着它）—— 回执是一行码。云端：带你去邮箱仓的新建文件页，点一下 Commit changes，会话自己取回；去不了就贴这一行。
+  const code = codeOf(res, items);
+  if (code) {
+    try { sessionStorage.setItem("vane.code." + MAIL.id, code); } catch (e) {}
+    if (MAIL.repo === MAIL_REPO && CLOUD_HOSTS.includes(location.hostname)) {
+      const u = "https://github.com/" + MAIL_REPO + "/new/main?filename=" + encodeURIComponent("a/" + MAIL.id + ".txt") + "&value=" + encodeURIComponent(code);
+      const go = h("a", {class: "btn primary big", href: u, rel: "noopener"}, icon("check"), h("span", {text: "去 GitHub 点一下 Commit changes"}));
+      notice("ok", "签好了 —— 还差一下", h("div", {},
+        h("p", {text: "正在带你去 GitHub 的新建文件页：文件名与内容已经填好，只要点页面上的 Commit changes，会话就自己取回这次签名。"}),
+        h("div", {class: "btnrow"}, go)), where);
+      out("去不了 GitHub？把这一行贴回会话", code, "一行，没有引号、没有空格（" + code.length + " 个字符）；" + (one ? "只批准上面那一份文件的这几个字节" : "批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "。");
+      setTimeout(() => location.assign(u), 1200);
+      return;
+    }
+    out("签好了：把这一行贴回会话", code, "一行，没有引号、没有空格（" + code.length + " 个字符）；" + (one ? "只批准上面那一份文件的这几个字节" : "批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "。会话 `vane sign courier take '<这一行>'` 验过才落。");
     return;
   }
   out("签好了：把下面这段贴回会话", res, (one ? "这段只批准上面那一份文件的这几个字节" : "这段批准上面这 " + items.length + " 份，每一份只批准它自己的字节") + "；改一个字节就作废。会话 `vane sign accept` 逐件验过才落。");
@@ -1262,6 +1326,12 @@ window.addEventListener("hashchange", () => location.reload());   // 已开着�
     return fail("要从 http://localhost:8765/（本机）或 https://mxx-yyl.github.io/signPage/（云端）打开（passkey 认的是这两处）");
   let payload = null;
   try { payload = await readPayload(); } catch (e) { return fail("链接读不动：" + e.message); }
+  if (payload) { MAIL = payload.mail || null; ALL_ITEMS = payload.items || []; }
+  if (MAIL && MAIL.id) {                                   // 2.13.0：从 GitHub 那一页退回来（或刷新）—— 这一份已经签过，把那一行码再摆出来，不用再按一次指纹
+    let kept = null;
+    try { kept = sessionStorage.getItem("vane.code." + MAIL.id); } catch (e) {}
+    if (kept) { out("这一份已经签过了：这是那一行码", kept, "已经在 GitHub 上点过 Commit changes 就不用管它；没点成就把这一行贴回会话。要重新签：关掉这一页，从会话的链接再打开。"); return; }
+  }
   if (payload && payload.license) return licenseFlow(payload.license, payload.pw);   // 云端 license 激活不要求浏览器支持 WebAuthn
   if (!window.PublicKeyCredential) {                       // 2.12.0：用不了 passkey 的浏览器（例如某个 app 里面的浏览器）—— 说清楚，给复制链接
     app.replaceChildren(hero("用不了 passkey", "这个浏览器签不了字",

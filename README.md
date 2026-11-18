@@ -2,13 +2,27 @@
 
 页面地址：**https://mxx-yyl.github.io/signPage/**
 
-这一页就是 vane 的签字页 `software/src/vane/signpage/index.html`（2.12.0），逐字节同一份：
+这一页就是 vane 的签字页 `software/src/vane/signpage/index.html`（**2.13.0**），逐字节同一份：
 
 | 文件 | sha256 |
 |---|---|
-| `index.html` | `3cd4856d7ab23de10bb419d5b6c498974374d19c92547d28ec6a6994660d3116` |
+| `index.html` | `fc1cd5569df37da9388b1c3dfac6e63061d719bf8e684b938803acf32ad65f89` |
 
-vane 那边：登记 `6b00f01cb5a1`（2026-11-06，susuqni 用 iCloud passkey 在这一页上签的许可 6b00f01cb5a1，memo D-311）把这一份字节封进箱 `6b00f01cb5a1`。
+vane 那边：登记 `4c62d8306f8f`（2026-11-15，用户 passkey 签的许可，memo D-387）把这一份字节封进箱 `4c62d8306f8f`（`vane-box/4c62d8306f8f/software/src/vane/signpage/index.html`）。
+2.12.0 之后网页上传过一版（2026-11-10，多了云端授权页 licenseFlow）；2.13.0 已经带着它，两边重新是同一份字节。
+
+## 2.13.0：签字的信使（memo D-387）—— 云会话的链接短到 100 字符以内，回来的是一行码
+
+用户 2026-11-13 第 10 点：「Cloud signing is currently a major issue … it failed every time due to truncation … The user only signs, at most pasting the schema.」
+
+- **短链接** `https://mxx-yyl.github.io/signPage/#q=<号>.<钥>`：要签的那一份由会话加密（AES-128-GCM，钥只在 `#` 后面、不进服务器），放进邮箱仓
+  `mxx-YYL/vane-sign-inbox` 的 `q/<号>`；页面按号取密文、在浏览器里解开，之后与老的 `#v1.` 链接同一条路（自己算 sha、摆原文）。
+- **签完出一行码** `vsig1.<号>.…`（只有字母数字、点、横线，没有引号与空格，三件一批不到 300 字符），并带你去 GitHub 的新建文件页
+  （`vane-sign-inbox` 的 `a/<号>.txt`），点一下 **Commit changes** 就送回去了；去不了就把那一行贴回会话。
+- 老的 `#v1.` 长链接照常能用；签法、签的字节、challenge 一样不变。
+
+**要先有的（用户在 GitHub 上做，会话做不了）**：建一只**公开**的仓 `mxx-YYL/vane-sign-inbox`（只放数据：请求是密文，回执不是秘密），
+默认分支 `main`；云会话的环境要够得着它（会话推请求、取回执）。没有它，短链接打不开（页面会说取不到），只能走老的长链接。
 
 ## 2.12.0：界面全面重画、主动替你勾好建议项
 

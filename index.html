@@ -263,7 +263,10 @@ textarea.json{display:block;width:100%;min-height:120px;margin-top:8px;padding:1
 //        pasting the schema」）：云端签字页认短链接 `#q=<号>.<钥>`（请求按号从只放数据的邮箱仓取、用链接里的钥解开，之后与 `#v1.` 同一条路：照旧自己算 sha、摆原文）；
 //        签完给**一行码** `vsig1.…`（没有引号、没有空格），并带你去 GitHub 的新建文件页（文件名与内容已经填好）—— 点一下 Commit changes，会话自己取回；
 //        那一页去不了就把这一行码贴回会话。本机 / VM 的签法、签的字节、challenge 一样不变。
-const PAGE_VERSION = "2.13.2";                           // 2.13.2（memo D-404，用户 2026-11-18）：签完只给一行码（复制、贴回会话），不再带人去 GitHub 提交 —— 那个仓是公开的
+//                                                       2.13.3（memo D-411，用户 2026-11-18「要有重簽的功能，現在的passkey用戶唷朋友很多，按下去的每次都不是你要的那個所以要最起碼可以反覆重簽」）：
+//                                                       签完留一个「签错了？换一把 passkey 再签一次」—— 同一份请求可以反复签，每签一次出一行新码（旧的那一行清掉）；会话按钥认签字人，
+//                                                       签错的那一行贴回去只会被拒、不会用掉这份请求。签法、签的字节、challenge 一样不变。
+const PAGE_VERSION = "2.13.3";                           // 2.13.2（memo D-404，用户 2026-11-18）：签完只给一行码（复制、贴回会话），不再带人去 GitHub 提交 —— 那个仓是公开的
 //                           // 2.12.0（用户 2026-11-06「對vane的簽字頁面改版，ui 全面重新設計，另外主動智能勾選建議項目」）：
                                                          // 2.13.1（memo D-404，用户 2026-11-18「signpage頁面在repo上有，是一個公開的repo」）：邮箱就是 signPage 仓自己（q/、a/ 两个目录）—— 邮箱仓 vane-sign-inbox 没有建
                                                           // 界面整个重画 —— 签法、签的字节、给出的 JSON 一样不变（challenge / 断言 / 登记 / setup 的代码原样搬过来）；
@@ -1052,7 +1055,10 @@ async function showItems(items, me, ret, pwSigners) {
   const btn = h("button", {class: "btn primary big", type: "button"}, icon("key"), btnText);
   const sum = h("div", {class: "sumline", role: "status"});
   const sub = h("p", {class: "sub", text: "Touch ID / Windows Hello / PIN / 安全钥都行" + (me ? " · 最近登记的是 " + me.principal : "")});
-  const bar = h("div", {class: "actionbar"}, sum, btn, sub);
+  //: 2.13.3（memo D-411）：签完之后的「再签一次」—— passkey 一多，系统弹出来的那一把常常不是签字人的；不用重开链接，换一把再签
+  const again = h("button", {class: "btn ghost", type: "button"}, icon("key"), h("span", {text: "签错了？换一把 passkey 再签一次"}));
+  again.hidden = true;
+  const bar = h("div", {class: "actionbar"}, sum, btn, again, sub);
   resultHost = h("div", {class: "results"});
   app.append(h("p", {class: "note", text: "用这台设备的 passkey 签：这台设备上登记过的谁都可以，会话那边按钥认签字人；私钥在设备里，这一页拿不到。" +
     (delegating ? "" : "签字用 passkey；密码只放权：只在担保 passkey 时出现（设 passkey 用会话给的 setup 链接）。")}), bar, resultHost);
@@ -1066,11 +1072,13 @@ async function showItems(items, me, ret, pwSigners) {
   function update() {
     const sel = selected(), need = groups.filter(g => !g.pick).length, off = plain.filter(it => !it.on).length;
     if (phase === "signed") {
-      btn.hidden = true; sub.hidden = true;
-      sum.replaceChildren(h("span", {class: "okline"}, icon("check"), "已签 " + signedCount + " 件"), h("span", {class: "muted", text: "结果在下面"}));
+      btn.hidden = true; sub.hidden = true; again.hidden = false;
+      sum.replaceChildren(h("span", {class: "okline"}, icon("check"), "已签 " + signedCount + " 件"),
+        h("span", {class: "muted", text: "结果在下面；会话说「不是签字人」就按下面这个键，换一把 passkey 再签，贴最新的那一行"}));
       if (pbtn) pbtn.disabled = true;
       return;
     }
+    btn.hidden = false; sub.hidden = false; again.hidden = true;
     const np = plain.filter(it => it.on).length, nd = groups.filter(g => g.pick).length;
     sum.replaceChildren(...[h("span", {}, "将签 ", h("b", {text: String(sel.length)}), " 件" + (np && nd ? "（" + np + " 件批准 + " + nd + " 个决定）" : "")),
       off ? h("span", {class: "muted", text: off + " 件没勾：这次不签，留着下次"}) : null].filter(Boolean));
@@ -1096,6 +1104,10 @@ async function showItems(items, me, ret, pwSigners) {
     }
   }
   btn.onclick = () => go("passkey");
+  again.onclick = () => {                                   // 2.13.3（memo D-411）：回到没签的样子 —— 勾与选都留着，旧的那一行码清掉，再按一次签
+    if (phase !== "signed") return;
+    phase = "idle"; signedCount = 0; bar.classList.remove("done"); resultHost.replaceChildren(); lock(false); update(); btn.focus();
+  };
   if (pbtn) pbtn.onclick = () => go("pw");
   groups.forEach(g => { if (g.sugg) choose(g, g.sugg.opt, "auto"); else badge(g); });
   update();
@@ -1324,7 +1336,7 @@ window.addEventListener("hashchange", () => location.reload());   // 已开着�
   if (MAIL && MAIL.id) {                                   // 2.13.0：从 GitHub 那一页退回来（或刷新）—— 这一份已经签过，把那一行码再摆出来，不用再按一次指纹
     let kept = null;
     try { kept = sessionStorage.getItem("vane.code." + MAIL.id); } catch (e) {}
-    if (kept) { out("这一份已经签过了：这是那一行码", kept, "把这一行贴回对话就好（不用、也不要往 GitHub 提交）。要重新签：关掉这一页，从会话给的入口再打开。"); return; }
+    if (kept) { out("这一份已经签过了：这是那一行码", kept, "已经在 GitHub 上点过 Commit changes 就不用管它；没点成就把这一行贴回会话。要重新签：关掉这一页，从会话的链接再打开。"); return; }
   }
   if (payload && payload.license) return licenseFlow(payload.license, payload.pw);   // 云端 license 激活不要求浏览器支持 WebAuthn
   if (!window.PublicKeyCredential) {                       // 2.12.0：用不了 passkey 的浏览器（例如某个 app 里面的浏览器）—— 说清楚，给复制链接
